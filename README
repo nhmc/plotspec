@@ -1,0 +1,7 @@
+To install, copy the plotspec/ directory to somewhere in your
+PYTHONPATH, and add the absolute path to the plotspec/scripts
+directory to your PATH variable. In bash for example, in your .bashrc
+file (or bash.profile, or similar) put:
+
+export PATH=$PATH:/path/to/plotspec/scripts/
+

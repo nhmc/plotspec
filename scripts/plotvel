@@ -1,0 +1,6 @@
+#!/usr/bin/env python
+
+if __name__ == '__main__':
+    import sys
+    from plotspec.plotvel_util import main
+    sys.exit(main(sys.argv[1:]))

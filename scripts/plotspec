@@ -1,0 +1,10 @@
+#!/usr/bin/env python
+
+if __name__ == '__main__':
+    import sys
+    import numpy as np
+    from plotspec.plotspec_util import main
+
+    np.seterr(divide='ignore', invalid='ignore')
+
+    sys.exit(main(sys.argv[1:]))
