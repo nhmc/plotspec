@@ -41,7 +41,7 @@ f5  toggle tick labels
 """
 
 prefix =  os.path.abspath(__file__).rsplit('/', 1)[0]
-dla_spec = Table(prefix + '/dla.fits')
+#dla_spec = Table(prefix + '/dla.fits')
 
 class Junk(object):
     def __init__(self, filenames, fig, options):
@@ -154,7 +154,8 @@ class Junk(object):
             m = model[c0] * (1. - val['logN']) + val['logN']
             #import pdb; pdb.set_trace()
             model[c0] = m
-      self.spec[self.i].model = model  
+            
+        self.spec[self.i].model = model
 
     def update(self):
         i = self.i
@@ -346,18 +347,18 @@ class Junk(object):
             self.tfl = temp.fl
             self.update()
  
-        elif event.key == 'D':
-            # print DLA spec (needs continuum)
-            z = event.xdata / 1215.6701 - 1
-            y = event.ydata
-            wa = dla_spec.wa * (1+z)
-            s = self.spec[self.i]
-            fl = np.interp(wa, s.wa, s.co) * dla_spec.fl
-            if self.artists['spec'] is not None:
-                self.artists['spec'].remove()
+        # elif event.key == 'D':
+        #     # print DLA spec (needs continuum)
+        #     z = event.xdata / 1215.6701 - 1
+        #     y = event.ydata
+        #     wa = dla_spec.wa * (1+z)
+        #     s = self.spec[self.i]
+        #     fl = np.interp(wa, s.wa, s.co) * dla_spec.fl
+        #     if self.artists['spec'] is not None:
+        #         self.artists['spec'].remove()
 
-            self.artists['spec'], = pl.plot(wa, fl, 'r')
-            self.update()
+        #     self.artists['spec'], = pl.plot(wa, fl, 'r')
+        #     self.update()
             
     def on_keypress_plotz(self, event):
         ax = event.inaxes
