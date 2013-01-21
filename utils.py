@@ -9,7 +9,6 @@ from barak.utilities import adict, get_data_path
 from barak.pyvpfit import readf26
 from barak.constants import c_kms
 from barak.spec import make_constant_dv_wa_scale, convolve_constant_dv
-from barak.convolve import convolve_psf
 
 try:
     from COS import convolve_with_COS_FOS
@@ -32,6 +31,7 @@ ATMOS = [(5570, 5590),
          (17435, 20850),
          (24150, 24800)]
 
+
 def lines_from_f26(f26):
     """ Convert a f26-file list of lines into a list we can pass to
     find_tau.
@@ -43,9 +43,9 @@ def lines_from_f26(f26):
     for l in f26.lines:
         print l['name']
         if l['name'].strip() in ('__', '<<', '>>', '<>'):
-            print "skipping!"
+            #print "skipping!"
             continue
-        lines.append((l['name'].replace(' ',''),l['z'],l['b'],l['logN']))
+        lines.append((l['name'].replace(' ', ''), l['z'], l['b'], l['logN']))
     return lines
 
 
@@ -58,12 +58,12 @@ def plot_tick_vel(ax, vpos, offset, t, tickz=None):
     T = ax.plot(
         [vpos, vpos], [1.05 + offset, 1.4 + offset],
         color='k', alpha=0.7, lw=1.5)
-    
+
     Tlabels = []
     if (tickz is not None and
         not (1e-5 < abs(t['z'] - tickz) < 1e-2)) or tickz is None:
         Tlabels.append(ax.text(vpos, 1.05 + offset, label, rotation=60,
-                               fontsize=8, va='bottom',alpha=0.7))
+                               fontsize=8, va='bottom', alpha=0.7))
 
     return T, Tlabels
 
@@ -80,8 +80,8 @@ def plot_tick_wa(ax, wa, fl, height, t, tickz=None):
     Tlabels = []
     if tickz is not None and not (1e-5 < abs(t.z - tickz) < 1e-2) or \
            tickz is None:
-        Tlabels.append(ax.text(wa, fl+1.4*height, label, rotation=60,
-                    fontsize=8, va='bottom',alpha=0.7))
+        Tlabels.append(ax.text(wa, fl + 1.4 * height, label, rotation=60,
+                    fontsize=8, va='bottom', alpha=0.7))
 
     return T, Tlabels
 
@@ -91,11 +91,12 @@ def plotregions(ax, wmin, wmax):
     """
     trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
     regions = []
-    for w0,w1 in zip(wmin, wmax):
+    for w0, w1 in zip(wmin, wmax):
         r, = ax.plot([w0, w1], [0.8, 0.8], color='r', lw=3, alpha=0.7,
                      transform=trans)
         regions.append(r)
     return regions
+
 
 def plot_velocity_regions(wmin, wmax, w0, w1, obswa, ax, offset):
     """ wmin, wmax is minimum and maximum wavelengths of the plot.
@@ -113,12 +114,13 @@ def plot_velocity_regions(wmin, wmax, w0, w1, obswa, ax, offset):
 
     vel0 = (w0[cond] / obswa - 1) * c_kms
     vel1 = (w1[cond] / obswa - 1) * c_kms
-    for v0,v1 in zip(vel0, vel1):
+    for v0, v1 in zip(vel0, vel1):
         yoff = 1.1 + offset
-        R, = ax.plot([v0, v1], [yoff,yoff],'r',lw=3, alpha=0.7)
+        R, = ax.plot([v0, v1], [yoff, yoff], 'r', lw=3, alpha=0.7)
         regions.append(R)
 
     return regions
+
 
 def print_example_options():
     print """\
@@ -139,8 +141,8 @@ def print_example_options():
     residuals = False
     """
 
-def process_options(opt_args):
 
+def process_options(opt_args):
     opt = adict()
     filename = os.path.abspath(__file__).rsplit('/', 1)[0] + '/default.cfg'
     opt = parse_config(filename)
@@ -151,11 +153,11 @@ def process_options(opt_args):
 
     opt.atom = readatom(molecules=True)
     if opt.Rfwhm is not None:
-        if isinstance(opt.Rfwhm, basestring): 
+        if isinstance(opt.Rfwhm, basestring):
             if opt.Rfwhm == 'convolve_with_COS_FOS':
                 if convolve_with_COS_FOS is None:
                     raise ValueError('convolve_with_COS_FOS() not available')
-                print 'Using tailored fwhm for Q0107 triple'
+                print 'Using tailored FWHM for COS/FOS data'
                 opt.Rfwhm = 'convolve_with_COS_FOS'
             elif opt.Rfwhm.endswith('fits'):
                 print 'Reading Resolution FWHM from', opt.Rfwhm
@@ -170,9 +172,9 @@ def process_options(opt_args):
             opt.Rfwhm = float(opt.Rfwhm)
 
     if opt.features is not None:
-        print 'reading feature list from', opt.features
+        print 'Reading feature list from', opt.features
         opt.features = readtabfits(opt.features)
-    
+
     if opt.f26 is not None:
         name = opt.f26
         print 'Reading ions and fitting regions from', name
@@ -180,7 +182,7 @@ def process_options(opt_args):
         opt.f26.filename = name
 
     if opt.transitions is not None:
-        print 'Reading transitions from', opt.transitions    
+        print 'Reading transitions from', opt.transitions
         fh = open(opt.transitions)
         trans = list(fh)
         fh.close()
@@ -196,7 +198,7 @@ def process_options(opt_args):
                         names='wa,name,select')
         #opt.linelist = readtxt(get_data_path() + 'linelists/qsoabs_lines',
         #                names='name,wa,select')
-    
+
     if opt.f26 is None and opt.taulines is not None:
         print 'Reading ions from', opt.taulines
         fh = open(opt.taulines)
@@ -242,7 +244,7 @@ def process_Rfwhm(Rfwhm, wa, model, models):
     elif Rfwhm == 'convolve_with_COS_FOS':
         #print 'convolving with COS/FOS instrument profile'
         #import pdb; pdb.set_trace()
-        model_out = convolve_with_COS_FOS(model, wa,use_COS_nuv=True)
+        model_out = convolve_with_COS_FOS(model, wa, use_COS_nuv=True)
         for m in models:
             #if m.min() < (1 - 1e-2):
             m = convolve_with_COS_FOS(m, wa, use_COS_nuv=True)
@@ -255,7 +257,8 @@ def process_Rfwhm(Rfwhm, wa, model, models):
         try:
             wa_dv = make_constant_dv_wa_scale(wa[0], wa[-1], Rfwhm / ndiv)
         except:
-            import pdb; pdb.set_trace()
+            import pdb
+            pdb.set_trace()
         model_out = convolve_constant_dv(wa, model, wa_dv, ndiv)
         # do the same to every model if there's more than one
         for m in models:
@@ -267,12 +270,13 @@ def process_Rfwhm(Rfwhm, wa, model, models):
 
     return model_out, models_out
 
+
 def process_args(args):
     out = []
     option = {}
     for arg in args:
         if '=' in arg:
-            key,val = arg.split('=')
+            key, val = arg.split('=')
             try:
                 val = float(val)
             except ValueError:
@@ -282,4 +286,3 @@ def process_args(args):
             out.append(arg)
 
     return out, option
-    
