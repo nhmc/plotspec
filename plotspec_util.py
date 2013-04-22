@@ -8,11 +8,9 @@ import matplotlib.pyplot as pl
 
 import barak.spec
 from barak.sed import get_SEDs
-from barak.utilities import between, indexnear, adict
-from barak.io import readtxt, readtabfits, parse_config
+from barak.utilities import between, indexnear
 from barak.convolve import convolve_psf
-from barak.absorb import find_tau, findtrans
-from barak.pyvpfit import readf26
+from barak.absorb import find_tau
 from barak.plot import axvlines
 from plotspec.utils import process_options, plotregions, process_Rfwhm, \
      plot_tick_wa, process_args, lines_from_f26
@@ -31,17 +29,18 @@ and so on ...
 """
 
 help = """Left and right arrows to switch between spectra.
-i   identify line to set redshift
-c   fit a dodgy continuum
-m   calculate S/N over a region
-v   velocity plot (requires a continuum)
-?   print this message
+i   Identify line to set redshift.
+c   Fit a dodgy continuum.
+m   Calculate S/N over a region.
+v   Velocity plot (requires a continuum).
+?   Print this message.
 
-f5  toggle tick labels
+f5  Toggle tick labels.
 """
 
-prefix =  os.path.abspath(__file__).rsplit('/', 1)[0]
+prefix = os.path.abspath(__file__).rsplit('/', 1)[0]
 #dla_spec = Table(prefix + '/dla.fits')
+
 
 class Junk(object):
     def __init__(self, filenames, fig, options):
@@ -58,9 +57,9 @@ class Junk(object):
         self.twa = []
         self.tfl = []
         self.models = [None] * self.n          # cache optical depths
-        temp = range(1, len(self.opt.linelist)+1)
-        self.linehelp = '\n'.join('%i: %s %.4f' % (i,r['name'],r['wa']) for
-                                  i,r in zip(temp, self.opt.linelist))
+        temp = range(1, len(self.opt.linelist) + 1)
+        self.linehelp = '\n'.join('%i: %s %.4f' % (i, r['name'], r['wa']) for
+                                  i, r in zip(temp, self.opt.linelist))
         self.linehelp += '\nEnter transition: '
         self.cids = dict()
         # disable any existing key press callbacks
@@ -105,17 +104,16 @@ class Junk(object):
         if self.opt.smoothby > 1:
             sfl = convolve_psf(s.fl, self.opt.smoothby, edge='reflect')
             self.artists['lines'][0].set_data(s.wa, sfl)
-        self.artists['template'], = self.ax.plot([],[], 'y')
-
+        self.artists['template'], = self.ax.plot([], [], 'y')
 
     def calc_model(self):
         lines = lines_from_f26(self.opt.f26)
         wa = self.spec[self.i].wa
-        dw = np.median(np.diff(wa)) 
+        dw = np.median(np.diff(wa))
         print 'finding tau'
         if self.opt.wadiv is not None:
             dw1 = dw / self.opt.wadiv
-            wa1 = np.arange(wa[0], wa[-1]+0.5*dw1, dw1)
+            wa1 = np.arange(wa[0], wa[-1] + 0.5 * dw1, dw1)
             tau, ticks = find_tau(wa1, lines, self.opt.atom)
         else:
             tau, ticks = find_tau(wa, lines, self.opt.atom)
@@ -123,18 +121,18 @@ class Junk(object):
         model = np.exp(-tau)
         # if we want to calculate the optical depth per line,
         # do it here.
-                
+
         if self.opt.wadiv is not None:
             model, _ = process_Rfwhm(self.opt.Rfwhm, wa1, model, [])
         else:
             model, _ = process_Rfwhm(self.opt.Rfwhm, wa, model, [])
-            
+
         if self.opt.wadiv is not None:
             model = np.interp(wa, wa1, model)
 
         self.models[self.i] = model
         self.ticks = ticks
-   
+
     def apply_zero_offsets(self):
         model = self.spec[self.i].model
         l = self.opt.f26.lines
@@ -149,12 +147,12 @@ class Junk(object):
             #print i0, i1
             #import pdb; pdb.set_trace()
             assert i0 - 1 == i1
-            c0 = between(self.spec[self.i].wa, regions.wmin[isort[i0-1]],
+            c0 = between(self.spec[self.i].wa, regions.wmin[isort[i0 - 1]],
                          regions.wmax[isort[i1]])
             m = model[c0] * (1. - val['logN']) + val['logN']
             #import pdb; pdb.set_trace()
             model[c0] = m
-            
+
         self.spec[self.i].model = model
 
     def update(self):
@@ -162,7 +160,7 @@ class Junk(object):
         self.artists['mlines'] = []
         a = self.ax
         s = self.spec[i]
-        wa,fl,er,co = s.wa, s.fl, s.er, s.co
+        wa, fl, er, co = s.wa, s.fl, s.er, s.co
         if self.models[i] is not None and (co > 0).any():
             temp = co * self.models[i]
             a.plot(wa, temp, color='orange')
@@ -176,13 +174,13 @@ class Junk(object):
                 f = np.interp(self.ticks.wa, wa, fl)
 
             height = 0.08 * np.percentile(fl, 90)
-            for j,t in enumerate(self.ticks):
+            for j, t in enumerate(self.ticks):
                 if self.opt.showticks:
-                    T,Tlabels = plot_tick_wa(a, t.wa, f[j], height, t,
+                    T, Tlabels = plot_tick_wa(a, t.wa, f[j], height, t,
                                      tickz=self.opt.tickz)
                     self.artists['ticks'].extend(T)
                     self.artists['ticklabels'].extend(Tlabels)
-                        
+
         if self.opt.f26 is not None and self.opt.f26.regions is not None:
             plotregions(a, self.opt.f26.regions.wmin,
                         self.opt.f26.regions.wmax)
@@ -190,15 +188,15 @@ class Junk(object):
         if self.opt.features is not None:
             f = self.opt.features
             sortfl = np.sort(fl[er > 0])
-            ref = sortfl[int(len(sortfl)*0.95)] -  sortfl[int(len(sortfl)*0.05)]
-            wedge = np.concatenate( [f.wa0, f.wa1] )
+            ref = sortfl[int(len(sortfl) * 0.95)] - sortfl[int(len(sortfl) * 0.05)]
+            wedge = np.concatenate([f.wa0, f.wa1])
             axvlines(wedge, ax=a, colors='k', alpha=0.7)
-            temp = co[np.array([indexnear(wa,wav) for wav in f.wac])]
-            ymin = temp + ref*0.1
-            ymax = ymin + ref*0.2
+            temp = co[np.array([indexnear(wa, wav) for wav in f.wac])]
+            ymin = temp + ref * 0.1
+            ymax = ymin + ref * 0.2
             a.vlines(f.wac, ymin, ymax, colors='g')
-            for j,f in enumerate(f):
-                a.text(f['wac'], ymax[j]+ ref*0.05, f['num'], ha='center',
+            for j, f in enumerate(f):
+                a.text(f['wac'], ymax[j] + ref * 0.05, f['num'], ha='center',
                        fontsize=12, color='g')
 
         fl = self.tfl * np.median(s.fl) / np.median(self.tfl)
@@ -218,24 +216,24 @@ class Junk(object):
                 # plot has been removed
                 pass
         self.artists['zlines'] = barak.spec.plotlines(
-            zp1-1, pl.gca(), lines=self.opt.linelist, labels=True)
+            zp1 - 1, pl.gca(), lines=self.opt.linelist, labels=True)
         pl.draw()
 
     def on_keypress(self, event):
         if event.key == 'right':
-            if self.i == self.n-1:
+            if self.i == self.n - 1:
                 print 'At the last spectrum.'
                 return
             self.artists['zlines'] = []
-            self.get_new_spec(self.i+1)
+            self.get_new_spec(self.i + 1)
             self.update()
-            
+
         elif event.key == 'left':
             if self.i == 0:
                 print 'At the first spectrum.'
                 return
             self.artists['zlines'] = []
-            self.get_new_spec(self.i-1)
+            self.get_new_spec(self.i - 1)
             self.update()
         elif event.key == '?':
             print help
@@ -263,9 +261,9 @@ class Junk(object):
                 self.artists['mlines'].append(pl.gca().axvline(
                     event.xdata, color='k', alpha=0.3))
                 pl.draw()
-                w0,w1 = self.wlim1, event.xdata
+                w0, w1 = self.wlim1, event.xdata
                 if w0 > w1:
-                    w0,w1 = w1,w0
+                    w0, w1 = w1, w0
                 sp = self.spec[self.i]
                 good = between(sp.wa, w0, w1) & (sp.er > 0) & ~np.isnan(sp.fl)
                 print ('median fl, rms fl, median er, pixel width, '
@@ -282,8 +280,8 @@ class Junk(object):
                 snr1 = medfl / stdfl
                 snr2 = medfl / meder
                 print '%9.3g, %.3g, %.3g, %.2g, %.2g/%.2g, %.2g/%.2g' % (
-                    medfl, stdfl, meder, pixwidth, snr1, snr1*mult,
-                    snr2, snr2*mult)
+                    medfl, stdfl, meder, pixwidth, snr1, snr1 * mult,
+                    snr2, snr2 * mult)
                 self.wlim1 = None
             else:
                 for l in self.artists['mlines']:
@@ -320,7 +318,6 @@ class Junk(object):
                 wmax = wa
                 if wmin > wmax:
                     wmin, wmax = wmax, wmin
-                wmid = 0.5*(wmin + wmax)
                 print '%%%% %s 1 %.3f %.3f vsig=x.x' % (self.filenames[self.i], wmin, wmax)
                 self.prev_wa = None
             else:
@@ -343,7 +340,7 @@ class Junk(object):
 4: Starburst galaxy
 """)
             temp = get_SEDs('LBG', 'lbg_em.dat')
-            temp.redshift_to(self.zp1-1)
+            temp.redshift_to(self.zp1 - 1)
             self.twa = temp.wa
             self.tfl = temp.fl
             self.update()
@@ -360,10 +357,11 @@ class Junk(object):
 
         #     self.artists['spec'], = pl.plot(wa, fl, 'r')
         #     self.update()
-            
+
     def on_keypress_plotz(self, event):
         ax = event.inaxes
-        if ax is None:  return
+        if ax is None:
+            return
         if event.key == 'i':
             # id line to get redshift
             while True:
@@ -378,12 +376,11 @@ class Junk(object):
                 else:
                     break
             zp1 = event.xdata / wa
-            print 'z=%.3f, %s %.2f' % (zp1-1, ion, wa)
+            print 'z=%.3f, %s %.2f' % (zp1 - 1, ion, wa)
         else:
             return
         self.zp1 = zp1
         self.plotlines(zp1)
-
 
     def on_keypress_smooth(self, event):
         if event.key != 's':
@@ -408,7 +405,7 @@ class Junk(object):
 
         self.artists['lines'][0].set_data(s.wa, sfl)
         pl.draw()
-        
+
     def connect(self, fig):
         cids = dict()
         cids['misc'] = fig.canvas.mpl_connect(
@@ -420,6 +417,7 @@ class Junk(object):
 
         self.cids.update(cids)
 
+
 def main(args):
     if len(args) < 1:
         print usage
@@ -427,8 +425,8 @@ def main(args):
 
     args, opt_args = process_args(args)
     options = process_options(opt_args)
-    
-    fig = pl.figure(figsize=(15,6))
+
+    fig = pl.figure(figsize=(15, 6))
     fig.subplots_adjust(left=0.04, right=0.98)
     junk = Junk(args, fig, options)
     junk.update()
