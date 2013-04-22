@@ -8,7 +8,8 @@ from barak.io import readtabfits, readtxt, parse_config
 from barak.utilities import adict, get_data_path
 from barak.pyvpfit import readf26
 from barak.constants import c_kms
-from barak.spec import make_constant_dv_wa_scale, convolve_constant_dv
+from barak.convolve import convolve_constant_dv
+from barak.sed import make_constant_dv_wa_scale
 from barak.convolve import convolve_psf
 
 try:
@@ -36,6 +37,9 @@ def lines_from_f26(f26):
     """ Convert a f26-file list of lines into a list we can pass to
     find_tau.
     """
+    if f26 is None:
+        return []
+
     if f26.lines is None:
         f26.lines = []
 

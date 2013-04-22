@@ -7,11 +7,11 @@ import matplotlib.pyplot as pl
 import matplotlib.transforms as mtransforms
 
 import barak.spec
-from barak.plot import A4PORTRAIT
+from barak.plot import A4PORTRAIT, A4LANDSCAPE
 from barak.utilities import indexnear, stats, between, adict
 from barak.convolve import convolve_psf
 from barak.absorb import calc_Wr, findtrans, \
-     calc_iontau, guess_logN_b
+     calc_iontau, guess_logN_b, calc_N_AOD
 from barak.pyvpfit import readf26
 from plotspec.utils import \
      process_options, plot_velocity_regions, process_Rfwhm, plot_tick_vel, \
@@ -74,6 +74,8 @@ f5           toggle tick labels on and off
 """
 
 wlya = 1215.6701
+wlyb = 1025.7223
+wlyg = 972.5368
 c_kms = 299792.458         # speed of light km/s, exact
 
 def calc_abs(wa, ion, zp1, resolution, logN=13.0, b=10.0, maxdv=10000):
@@ -252,7 +254,7 @@ class VelplotWrap(object):
         self.ner = ner
         self.nfl = nfl
         self.co = np.ones(len(wa))
-        edges = barak.spec.find_wa_edges(wa)    # pixel edges
+        edges = barak.spec.find_bin_edges(wa)    # pixel edges
         dwa = edges[1:] - edges[:-1]             # width per pixel
         self.dwa = dwa
         self.ew =  (1 - nfl) * dwa               # equiv. width
@@ -272,10 +274,11 @@ class VelplotWrap(object):
         self.taus = {}
         self.models = {}        
         self.ticks = {}
-        
+
         self.update_model()
         self.convolve_LSF()
-        self.apply_zero_offsets()
+        if options.f26 is not None:
+            self.apply_zero_offsets()
 
         artists, offsets, num_per_panel, axes = initvelplot(
             wa, nfl, ner, self.co, options.linelist, options.z, fig,
@@ -321,9 +324,11 @@ class VelplotWrap(object):
                 temp = np.rec.fromarrays([ions] + zip(*tick), dtype=dtype)
             self.ticks[l] = temp
 
-        self.allticks =  np.concatenate(
-            [self.ticks[l] for l in self.ticks]).view(np.recarray)
-        self.allticks.sort(order='wa')
+        self.allticks = []
+        if len(self.ticks) > 0:
+            self.allticks =  np.concatenate(
+                [self.ticks[l] for l in self.ticks]).view(np.recarray)
+            self.allticks.sort(order='wa')
  
         tau = np.zeros_like(wa)
         for line in self.taus:
@@ -348,6 +353,8 @@ class VelplotWrap(object):
 
     def apply_zero_offsets(self):
         l = self.opt.f26.lines
+        if self.opt.f26.regions is None:
+            return
         regions = self.opt.f26.regions
         isort = regions.wmin.argsort()
         zeros = l[l.name == '__']
@@ -371,7 +378,7 @@ class VelplotWrap(object):
             self.artists, self.opt)
 
         self.z = z
-        
+
         zp1 = z + 1
         betamin = self.vmin / c_kms
         betamax = self.vmax / c_kms
@@ -404,7 +411,7 @@ class VelplotWrap(object):
             obswa = watrans * zp1
             wmin = obswa * (1 + 3*betamin)
             wmax = obswa * (1 + 3*betamax)
-            if self.opt.showticks:
+            if self.opt.showticks and len(self.allticks) > 0:
                 ticks = self.allticks
                 tickwmin = obswa * (1 + betamin)
                 tickwmax = obswa * (1 + betamax)
@@ -425,6 +432,9 @@ class VelplotWrap(object):
 
             cond = between(wa, wmin, wmax)
             #good = ~np.isnan(fl) & (er > 0) & ~np.isnan(co)
+
+            # remove ultra-low S/N regions to help plotting
+            cond &= ner < 1.5
                 
             fl = nfl[cond]
             co = nco[cond]
@@ -504,8 +514,9 @@ class VelplotWrap(object):
         elif event.key == 'R':
             self.refresh_f26()
             self.update_model()
-            self.convolve_LSF()
-            self.apply_zero_offsets()
+            if self.opt.f26 is not None:
+                self.convolve_LSF()
+                self.apply_zero_offsets()
             self.update(self.z)
         elif event.key == ' ' and  event.inaxes is not None:
             z = self.z
@@ -552,9 +563,10 @@ class VelplotWrap(object):
             if self.opt.f26 is not None:
                 i = indexnear(self.allticks.wa, wa)
                 tick = self.allticks[i]
-                s = ', closest tick: %-s %.1f z=%.5f' % (
+                s = '\nclosest tick: %-s %.1f z=%.5f' % (
                     tick['name'], tick['wa0'], tick['z'])
-            print '%12s dv=%.1f wa=%.3f' % (tr['name'], event.xdata, wa) + s
+            print '%12s dv=%.1f wa=%.3f zlya=%.4f, zlyb=%.4f, zlyg=%.4f' % (
+                tr['name'], event.xdata, wa, wa/wlya-1, wa/wlyb-1, wa/wlyg-1) + s
         elif event.key == 'l':
             # guess a line N, z and b and print to screen need to know
             # which transition we want, and what the central index is.
@@ -599,10 +611,19 @@ class VelplotWrap(object):
                 if i0 > i1:
                     i0, i1 = i1, i0
                 f = calc_Wr(i0, i1, wa, tr['tr'], self.ew, self.ewer)
-                print '%s z=%.6f ngoodpix=%3i  wa=%.3f-%.3f ' % (
-                    tr['name'], f.zp1-1, f.ngoodpix, wa[i0], wa[i1])
-                print '   Wr=%.3f+/-%.3fA logN=%.4f (%.3f-%.3f) 5sig detect lim %.4f' % (
-                    f.Wr, f.Wre, f.logN[1], f.logN[0], f.logN[2], f.Ndetlim)
+                print '%s z=%.6f  Wr=%.3f+/-%.3fA  ngoodpix=%3i  wa=%.3f-%.3f ' % (
+                    tr['name'], f.zp1-1, f.Wr, f.Wre,  f.ngoodpix, wa[i0], wa[i1])
+                print '  Optically thin approx: logN=%.4f (%.3f-%.3f) 5sig detect lim %.4f' % (
+                    f.logN[1], f.logN[0], f.logN[2], f.Ndetlim)
+                # Assume continuum error of 2 sigma, zero point error
+                # of two sigma. Currently this is done per pixel,
+                # would be better to do it per region. No problem as
+                # long as error doesn't vary much over the region.
+                logNlo, logN, logNhi, saturated = calc_N_AOD(
+                    self.wa[i0:i1], self.nfl[i0:i1], self.ner[i0:i1],
+                    2, 2, 1, 1, tr['tr']['wa'], tr['tr']['osc'])
+                print '   AOD: logN=%.4f (%.3f-%.3f)  Saturated? %s' % (
+                    logN, logNlo, logNhi, saturated)
                 self.artists['ew'].remove()
                 self.artists['ew'] = event.inaxes.fill_between(
                     (wa[i0:i1+1] / tr['wa']/ (1+self.z) - 1) * c_kms,
@@ -673,8 +694,16 @@ def main(args):
     spec = barak.spec.read(filename)
     if np.isnan(spec.co).all():
         spec.co[:] = 1.
-
-    fig = pl.figure(figsize=A4PORTRAIT)
+    if options.fitcontinuum:
+        print(stats(spec.fl))
+        spec.co = barak.spec.find_cont(spec.fl,
+                                       fwhm1=options.fwhm1,
+                                       fwhm2=options.fwhm2,
+                                       nchunks=options.nchunks,
+                                       nsiglo=options.nsig_cont)
+    
+    #fig = pl.figure(figsize=A4PORTRAIT)
+    fig = pl.figure(figsize=(16, 12))
     print help
     junk = VelplotWrap(spec.wa, spec.fl/spec.co, spec.er/spec.co, fig,
                        spec.filename, options)

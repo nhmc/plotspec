@@ -242,8 +242,9 @@ class Junk(object):
         elif event.inaxes is None:
             return
         elif event.key == ' ':
-            print '%.4f  %i' % (
-                event.xdata, indexnear(self.spec[self.i].wa, event.xdata))
+            print '%.4f  %.4f %i' % (
+                event.xdata, event.ydata,
+                indexnear(self.spec[self.i].wa, event.xdata))
         elif event.key == 'f5':
             if self.opt.ticklabels:
                 for t in self.artists['ticklabels']:
