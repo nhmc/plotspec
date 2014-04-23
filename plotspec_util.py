@@ -4,14 +4,16 @@ from math import sqrt
 from atpy import Table
 
 import numpy as np
-import matplotlib.pyplot as pl
+import matplotlib.pyplot as plt
+
+from barak.interactive_plot import PlotWrapBase_Continuum
 
 import barak.spec
 from barak.sed import get_SEDs
 from barak.utilities import between, indexnear
 from barak.convolve import convolve_psf
 from barak.absorb import find_tau
-from barak.plot import axvlines
+from barak.plot import axvlines#, get_flux_plotrange
 from plotspec.utils import process_options, plotregions, process_Rfwhm, \
      plot_tick_wa, process_args, lines_from_f26
 
@@ -28,21 +30,25 @@ H-a          6564.0
 and so on ...
 """
 
-help = """Left and right arrows to switch between spectra.
-i   Identify line to set redshift.
-c   Fit a dodgy continuum.
-m   Calculate S/N over a region.
-v   Velocity plot (requires a continuum).
-?   Print this message.
+help = PlotWrapBase_Continuum._help_string + """
+Left and right arrows to switch between spectra.
 
-f5  Toggle tick labels.
+h   Print a vpfit-style HI line
+B   Print a vpfit-style fitting region
+I   Identify line to set redshift.
+C   Fit a dodgy continuum.
+m   Calculate S/N over a region.
+
+E   Plot a template
+
+T   Toggle tick labels.
+?   Print this help message
 """
 
 prefix = os.path.abspath(__file__).rsplit('/', 1)[0]
 #dla_spec = Table(prefix + '/dla.fits')
 
-
-class Junk(object):
+class PlotWrap(PlotWrapBase_Continuum):
     def __init__(self, filenames, fig, options):
         """ Resolution is resolution FWHM in units of pixels.
         """
@@ -51,17 +57,21 @@ class Junk(object):
         self.i = 0
         if options.z is None:
             options.z = 0
+        self.nsmooth = options.nsmooth
         self.zp1 = options.z + 1
+        self.contpoints = []
         self.n = len(self.filenames)
         self.spec = [None] * self.n          # cache spectra
         self.twa = []
         self.tfl = []
         self.models = [None] * self.n          # cache optical depths
         temp = range(1, len(self.opt.linelist) + 1)
+        #import pdb; pdb.set_trace()
         self.linehelp = '\n'.join('%i: %s %.4f' % (i, r['name'], r['wa']) for
                                   i, r in zip(temp, self.opt.linelist))
         self.linehelp += '\nEnter transition: '
-        self.cids = dict()
+        self.lines = self.opt.linelist
+        self.cids = []
         # disable any existing key press callbacks
         cids = list(fig.canvas.callbacks.callbacks['key_press_event'])
         for cid in cids:
@@ -79,6 +89,7 @@ class Junk(object):
         self.wlim1 = None
         self.prev_wa = None
         self.get_new_spec(0)
+        self.outdir = ''
         print help
 
     def get_new_spec(self, i):
@@ -99,12 +110,28 @@ class Junk(object):
         co = s.co
         if self.opt.co_is_sky:
             co = s.co * np.median(s.fl) / np.median(s.co) * 0.1
-        self.artists['lines'] = barak.spec.plot(
+        self.artists['spec'] = barak.spec.plot(
             s.wa, s.fl, s.er, co, ax=self.ax, show=0, yperc=0.90)
-        if self.opt.smoothby > 1:
-            sfl = convolve_psf(s.fl, self.opt.smoothby, edge='reflect')
-            self.artists['lines'][0].set_data(s.wa, sfl)
+        self.artists['fl'] = self.artists['spec'][0]
+        self.artists['co'] = self.artists['spec'][2]
+        if self.nsmooth > 0:
+            sfl = convolve_psf(s.fl, self.nsmooth, edge='reflect')
+            self.artists['fl'].set_data(s.wa, sfl)
         self.artists['template'], = self.ax.plot([], [], 'y')
+        self.artists['contpoints'], = self.ax.plot(
+            [0], [0], 'x', mfc='None', mew=0.5, ms=8, mec='r')
+
+        line_artists = barak.spec.plotlines(
+            self.zp1-1, self.ax, labels=1, fontsize=10, lcolor='0.3',
+            offsets=False)
+
+        self.artists['lines'] = line_artists
+
+        self.fl = s.fl
+        self.wa = s.wa
+        self.co = co
+        self.name = self.filenames[i]
+
 
     def calc_model(self):
         lines = lines_from_f26(self.opt.f26)
@@ -132,6 +159,7 @@ class Junk(object):
 
         self.models[self.i] = model
         self.ticks = ticks
+        self.model = model
 
     def apply_zero_offsets(self):
         model = self.spec[self.i].model
@@ -154,6 +182,7 @@ class Junk(object):
             model[c0] = m
 
         self.spec[self.i].model = model
+        self.model = model
 
     def update(self):
         i = self.i
@@ -166,7 +195,7 @@ class Junk(object):
             a.plot(wa, temp, color='orange')
         a.set_title(self.filenames[i])
         if self.zp1 is not None:
-            self.plotlines(self.zp1)
+            self.update_lines()
         if self.ticks is not None:
             if not np.isnan(co).all() and not self.opt.co_is_sky:
                 f = np.interp(self.ticks.wa, wa, co)
@@ -188,7 +217,7 @@ class Junk(object):
         if self.opt.features is not None:
             f = self.opt.features
             sortfl = np.sort(fl[er > 0])
-            ref = sortfl[int(len(sortfl) * 0.95)] - sortfl[int(len(sortfl) * 0.05)]
+            ref = sortfl[int(len(sortfl)*0.95)] - sortfl[int(len(sortfl)*0.05)]
             wedge = np.concatenate([f.wa0, f.wa1])
             axvlines(wedge, ax=a, colors='k', alpha=0.7)
             temp = co[np.array([indexnear(wa, wav) for wav in f.wac])]
@@ -206,20 +235,40 @@ class Junk(object):
             for t in self.artists['ticklabels']:
                 t.set_visible(False)
         barak.spec.plotatmos(a)
-        pl.draw()
+        self.fig.canvas.draw()
 
-    def plotlines(self, zp1):
-        for l in self.artists['zlines']:
-            try:
+    def update_lines(self):
+        """ Update the line indicators with a new redshift.
+        """
+        try:
+            for l in self.artists['lines']['lines']:
                 l.remove()
-            except ValueError:
-                # plot has been removed
-                pass
-        self.artists['zlines'] = barak.spec.plotlines(
-            zp1 - 1, pl.gca(), lines=self.opt.linelist, labels=True)
-        pl.draw()
+        except ValueError:
+            pass
+        for art in self.artists['lines']['labels']:
+            art.remove()
+        for art in self.artists['lines']['atmos']:
+            art.remove()
+        self.artists['lines'] = barak.spec.plotlines(
+            self.zp1 - 1, self.ax, labels=1, fontsize=10,
+            lcolor='0.3', lines=self.lines, offsets=False)
+        #if not self.showlabels:
+        #    for t in self.artists['lines']['labels']:
+        #        t.set_visible(False)
 
-    def on_keypress(self, event):
+        
+        # for key in self.artists['zlines']:
+        #     for l in self.artists['zlines'][key]:
+        #         try:
+        #             l.remove()
+        #         except ValueError:
+        #             # plot has been removed
+        #             pass
+        # self.artists['zlines'] = barak.spec.plotlines(
+        #     zp1 - 1, plt.gca(), lines=self.opt.linelist, labels=True)
+        # plt.draw()
+
+    def on_keypress_custom(self, event):
         if event.key == 'right':
             if self.i == self.n - 1:
                 print 'At the last spectrum.'
@@ -237,13 +286,7 @@ class Junk(object):
             self.update()
         elif event.key == '?':
             print help
-        elif event.inaxes is None:
-            return
-        elif event.key == ' ':
-            print '%.4f  %.4f %i' % (
-                event.xdata, event.ydata,
-                indexnear(self.spec[self.i].wa, event.xdata))
-        elif event.key == 'f5':
+        elif event.key == 'T':
             if self.opt.ticklabels:
                 for t in self.artists['ticklabels']:
                     t.set_visible(False)
@@ -254,13 +297,16 @@ class Junk(object):
                 for t in self.artists['ticklabels']:
                     if x0 < t.get_position()[0] < x1:
                         t.set_visible(True)
-
             self.fig.canvas.draw()
-        elif event.key == 'm':
+        elif event.key == ' ' and event.inaxes is not None:
+            print '%.4f  %.4f %i' % (
+                event.xdata, event.ydata,
+                indexnear(self.spec[self.i].wa, event.xdata))
+        elif event.key == 'm' and event.inaxes is not None:
             if self.wlim1 is not None:
-                self.artists['mlines'].append(pl.gca().axvline(
+                self.artists['mlines'].append(plt.gca().axvline(
                     event.xdata, color='k', alpha=0.3))
-                pl.draw()
+                plt.draw()
                 w0, w1 = self.wlim1, event.xdata
                 if w0 > w1:
                     w0, w1 = w1, w0
@@ -290,18 +336,18 @@ class Junk(object):
                     except ValueError:
                         # plot has been removed
                         pass
-                self.artists['mlines'].append(pl.gca().axvline(
+                self.artists['mlines'].append(plt.gca().axvline(
                     event.xdata,  color='k', alpha=0.3))
-                pl.draw()
+                plt.draw()
                 self.wlim1 = event.xdata
                 print "press 'm' again..."
 
-        elif event.key == 'c':
+        elif event.key == 'C':
             # fit dodgy continuum
             sp = self.spec[self.i]
             co = barak.spec.find_cont(sp.fl)
-            temp, = pl.gca().plot(sp.wa, co, 'm')
-            pl.draw()
+            temp, = plt.gca().plot(sp.wa, co, 'm')
+            plt.draw()
             c = raw_input('Accept continuum? (y) ')
             if (c + ' ').lower()[0] != 'n':
                 print 'Accepted'
@@ -310,7 +356,7 @@ class Junk(object):
             else:
                 temp.remove()
 
-        elif event.key == 'b':
+        elif event.key == 'B' and event.inaxes is not None:
             # print fitting region
             wa = event.xdata
             if self.prev_wa != None:
@@ -323,13 +369,13 @@ class Junk(object):
             else:
                 self.prev_wa = wa
 
-        elif event.key == 'l':
+        elif event.key == 'h' and event.inaxes is not None:
             # print HI line
             wa = event.xdata
             z = wa / 1215.6701 - 1
             print '%-6s %8.6f 0.0 %3.0f 0.0 %4.1f 0.0' % ('HI', z, 20, 14.0)
 
-        elif event.key == 't':
+        elif event.key == 'E':
             # overplot a template
             c = '0'
             while c not in '1234':
@@ -345,24 +391,26 @@ class Junk(object):
             self.tfl = temp.fl
             self.update()
  
-        # elif event.key == 'D':
-        #     # print DLA spec (needs continuum)
-        #     z = event.xdata / 1215.6701 - 1
-        #     y = event.ydata
-        #     wa = dla_spec.wa * (1+z)
-        #     s = self.spec[self.i]
-        #     fl = np.interp(wa, s.wa, s.co) * dla_spec.fl
-        #     if self.artists['spec'] is not None:
-        #         self.artists['spec'].remove()
+        elif event.key == 'D' and event.inaxes is not None:
+            # print DLA spec (needs continuum)
+            z = event.xdata / 1215.6701 - 1
+            y = event.ydata
+            wa = dla_spec.wa * (1+z)
+            s = self.spec[self.i]
+            fl = np.interp(wa, s.wa, s.co) * dla_spec.fl
+            if self.artists['spec'] is not None:
+                self.artists['spec'].remove()
 
-        #     self.artists['spec'], = pl.plot(wa, fl, 'r')
-        #     self.update()
+            self.artists['spec'], = plt.plot(wa, fl, 'r')
+            self.update()
 
     def on_keypress_plotz(self, event):
+        """ key to identify a line and assign a redshift
+        """
         ax = event.inaxes
         if ax is None:
             return
-        if event.key == 'i':
+        if event.key == 'I':
             # id line to get redshift
             while True:
                 c = raw_input(self.linehelp)
@@ -380,43 +428,19 @@ class Junk(object):
         else:
             return
         self.zp1 = zp1
-        self.plotlines(zp1)
+        self.update_lines()
 
-    def on_keypress_smooth(self, event):
-        if event.key != 's':
-            return
-        s = self.spec[self.i]
-        c = raw_input('New FWHM in pixels of Gaussian to convolve with? '
-                      '(blank for no smoothing) ')
-        if c == '':
-            # restore spectrum
-            self.opt.smoothby = 1
-            sfl = s.fl
-        else:
-            try:
-                fwhm = int(c)
-            except TypeError:
-                print 'FWHM must be an integer'
-            if fwhm == 0:
-                self.opt.smoothby = 1
-            else:
-                self.opt.smoothby = fwhm
-            sfl = convolve_psf(s.fl, self.opt.smoothby, edge='reflect')
-
-        self.artists['lines'][0].set_data(s.wa, sfl)
-        pl.draw()
-
+        self.fig.canvas.draw()
+        
     def connect(self, fig):
-        cids = dict()
-        cids['misc'] = fig.canvas.mpl_connect(
-            'key_press_event', self.on_keypress)
-        cids['plotz'] = fig.canvas.mpl_connect(
-            'key_press_event', self.on_keypress_plotz)
-        cids['smooth'] = fig.canvas.mpl_connect(
-            'key_press_event', self.on_keypress_smooth)
-
-        self.cids.update(cids)
-
+        # connect all methods starting with on_keypress_. This catches
+        # the functions in PlotWrapBase too.
+        cids = []
+        for n in dir(self):
+            if n.startswith('on_keypress_'):
+                cids.append(fig.canvas.mpl_connect(
+                    'key_press_event', getattr(self, n)))
+        self.cids.extend(cids)
 
 def main(args):
     if len(args) < 1:
@@ -426,8 +450,8 @@ def main(args):
     args, opt_args = process_args(args)
     options = process_options(opt_args)
 
-    fig = pl.figure(figsize=(15, 6))
+    fig = plt.figure(figsize=(15, 6))
     fig.subplots_adjust(left=0.04, right=0.98)
-    junk = Junk(args, fig, options)
-    junk.update()
-    pl.show()
+    wrap = PlotWrap(args, fig, options)
+    wrap.update()
+    plt.show()

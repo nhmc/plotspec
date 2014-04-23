@@ -17,6 +17,11 @@ from plotspec.utils import \
      process_options, plot_velocity_regions, process_Rfwhm, plot_tick_vel, \
      ATMOS, process_args, lines_from_f26
 
+# expand continuum adjsutments this many Ang either side of the
+# fitting region.
+
+expand_cont_adjustment = 10
+
 np.seterr(divide='ignore', invalid='ignore')
 unrelated = []
 #         ( 3863.451, 3865.529),
@@ -219,14 +224,14 @@ def initvelplot(wa, nfl, ner, nco, transitions, z, fig, atom,
             #ax.axhline(offset-0.1, color='k', lw=0.3)
             ax.axhline(offset - 0.05, color='k', lw=0.3)
             ax.axhline(offset - 0.15, color='k', lw=0.3)
-        bbox = dict(facecolor='w', edgecolor='None')
+        bbox = dict(facecolor='k', edgecolor='None')
         transf = mtransforms.blended_transform_factory(
             ax.transAxes, ax.transData)
         name = trans['name']
         if 'tr' in trans and osc:
             name = name + ' %.3g' % trans['tr']['osc']
         artists['text'].append(
-            ax.text(0.03, offset + 0.5, name, fontsize=15, bbox=bbox,
+            ax.text(0.03, offset + 0.5, name, fontsize=15, #bbox=bbox,
                     transform=transf, zorder=20))
 
     for ax in axes:
@@ -256,6 +261,7 @@ class VelplotWrap(object):
         self.ner = ner
         self.nfl = nfl
         self.co = np.ones(len(wa))
+        self.co0 = np.ones(len(wa))
         edges = barak.spec.find_bin_edges(wa)    # pixel edges
         dwa = edges[1:] - edges[:-1]             # width per pixel
         self.dwa = dwa
@@ -281,6 +287,7 @@ class VelplotWrap(object):
         self.convolve_LSF()
         if options.f26 is not None:
             self.apply_zero_offsets()
+            self.apply_cont_adjustments()
 
         artists, offsets, num_per_panel, axes = initvelplot(
             wa, nfl, ner, self.co, options.linelist, options.z, fig,
@@ -315,6 +322,8 @@ class VelplotWrap(object):
         for l in new_lines:
             #print 'z, logN, b', z, logN, b
             ion, z, b, logN = l
+            if ion in ('__', '<>', '<<', '>>'):
+                continue
             maxdv = 20000 if logN > 18 else 500
             t, tick = calc_iontau(wa, self.opt.atom[ion], z + 1, logN, b,
                                  ticks=True, maxdv=maxdv)
@@ -372,6 +381,33 @@ class VelplotWrap(object):
             model = self.model[c0] * (1. - val['logN']) + val['logN']
             #import pdb; pdb.set_trace()
             self.model[c0] = model
+
+    def apply_cont_adjustments(self):
+        l = self.opt.f26.lines
+        if self.opt.f26.regions is None:
+            return
+        regions = self.opt.f26.regions
+        isort = regions.wmin.argsort()
+        adjust = l[l.name == '<>']
+        print 'applying continuum adjustments for', len(adjust), 'regions'
+        for val in adjust:
+            wa = self.opt.atom['<>'].wa[0] * (1 + val['z'])
+            i0 = regions.wmin[isort].searchsorted(wa)
+            i1 = regions.wmax[isort].searchsorted(wa)
+            #print i0, i1
+            #import pdb; pdb.set_trace()
+            assert i0 - 1 == i1
+            linterm = val['b']
+            level = val['logN']
+
+            wa0 = regions.wmin[isort[i0 - 1]] - expand_cont_adjustment
+            wa1 = regions.wmax[isort[i1]] + expand_cont_adjustment
+            c0 = between(self.wa, wa0, wa1)
+
+            mult = level + linterm * (self.wa[c0]/wa - 1)
+            #print mult
+            self.model[c0] = self.model[c0] * mult
+
 
     def update(self, z):
         if self.opt.f26 is not None:
@@ -524,6 +560,7 @@ class VelplotWrap(object):
             if self.opt.f26 is not None:
                 self.convolve_LSF()
                 self.apply_zero_offsets()
+                self.apply_cont_adjustments()
             self.update(self.z)
         elif event.key == ' ' and event.inaxes is not None:
             z = self.z
@@ -709,7 +746,8 @@ def main(args):
                                        nsiglo=options.nsig_cont)
     
     #fig = pl.figure(figsize=A4PORTRAIT)
-    fig = pl.figure(figsize=(16, 12))
+    #fig = pl.figure(figsize=(16, 12))
+    fig = pl.figure(figsize=(6, 5))
     print help
     junk = VelplotWrap(spec.wa, spec.fl / spec.co, spec.er / spec.co, fig,
                        spec.filename, options)

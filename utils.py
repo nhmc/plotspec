@@ -47,7 +47,7 @@ def lines_from_f26(f26):
     lines = []
     for l in f26.lines:
         print l['name']
-        if l['name'].strip() in ('__', '<<', '>>', '<>'):
+        if l['name'].strip() in ('<<', '>>'):
             #print "skipping!"
             continue
         lines.append((l['name'].replace(' ', ''), l['z'], l['b'], l['logN']))
@@ -140,12 +140,11 @@ def print_example_options():
     showticks = True
     z = 3
     wadiv = 6
-    smoothby = 5
+    nsmooth = 1
     show_oscillator_strength = False
     dv = 1000
     residuals = False
     """
-
 
 def process_options(opt_args):
     opt = adict()
@@ -195,6 +194,8 @@ def process_options(opt_args):
         for tr in trans:
             tr = tr.strip()
             if tr and not tr.startswith('#'):
+                junk = tr.split()
+                tr = junk[0] + ' ' + junk[1]
                 t = findtrans(tr, atomdat=opt.atom)
                 temp.append(dict(name=t[0], wa=t[1][0], tr=t[1]))
         opt.linelist = temp
