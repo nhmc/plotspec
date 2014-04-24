@@ -84,70 +84,6 @@ wlyg = 972.5368
 c_kms = 299792.458         # speed of light km/s, exact
 
 
-def calc_abs(wa, ion, zp1, resolution, logN=13.0, b=10.0, maxdv=10000):
-    """ Generate a normalised continuum over some wavelength range
-    including absorption from an ion.
-
-    Includes instrumental broadening. Splits the wavelength array up
-    into smaller bins if necessary to sample the instrumental profile
-    properly.
-
-    Parameters
-    ----------
-    wa: array of floats
-        The array of wavelengths (Angstroms) where the continuum will
-        be generated.
-    ion: atom.dat entry
-        The full atom.dat list of transitions for given ion,
-        i.e. at['HI']
-    zp1: float
-        One plus the redshift of the ion.
-    resolution:
-        The spectrum resolution.
-    logN: float (13.0)
-        log10 of column density in absorbers per cm**2.
-    b: float (10.)
-        b parameter in km/s of the ion.
-    maxdv: float (1000)
-        For performance reasons, only calculate the Voigt profile for
-        a single line to +/- maxdv.  Increase this if you expect
-        DLA-type extended wings.
-
-    Returns
-    -------
-    co: array of floats
-        normalised continuum including absorption
-    """
-    # show expected lines with sample N, b.
-
-    # use smaller wave divisions so voigt profiles are sampled properly
-    # new array
-    wa = np.asarray(wa)
-    dv = np.diff(wa).mean() / wa.mean() * c_kms
-    ndiv = int(np.ceil(dv / (b / 2.)))
-    print 'dividing', ndiv, 'times'
-    n = len(wa)
-    wa0 = np.interp(np.linspace(0, n - 1, (n - 1) * ndiv), range(n), wa)
-
-    tau = calc_iontau(wa0, ion, zp1, logN, b, maxdv=maxdv)
-    co0 = np.exp(-tau)
-
-    # instrumental broadening
-    fwhmwa = wa.mean() / resolution
-    i = indexnear(wa, wa.mean())
-    fwhmpix = fwhmwa / (wa[i + 1] - wa[i])
-    print 'fwhmpix', fwhmpix
-    co1 = convolve_psf(co0, fwhmpix * ndiv)
-
-    # re-bin back to original wav array
-    co2 = np.empty_like(wa)
-    for i in range(len(wa)):
-        co2[i] = co1[i * ndiv:i * ndiv + ndiv].mean()
-
-    co = np.where(np.isnan(co2), 1, co2)
-    return co
-
-
 def initvelplot(wa, nfl, ner, nco, transitions, z, fig, atom,
                 vmin=-1000., vmax=1000., nmodels=0,
                 osc=False, residuals=False):
@@ -326,7 +262,8 @@ class VelplotWrap(object):
                 continue
             maxdv = 20000 if logN > 18 else 500
             t, tick = calc_iontau(wa, self.opt.atom[ion], z + 1, logN, b,
-                                 ticks=True, maxdv=maxdv)
+                                  ticks=True, maxdv=maxdv,
+                                  logNthresh_LL=self.opt.logNthresh_LL)
             self.taus[l] = t
             self.models[l] = np.exp(-t)
             temp = np.empty(0, dtype=dtype)

@@ -141,9 +141,11 @@ class PlotWrap(PlotWrapBase_Continuum):
         if self.opt.wadiv is not None:
             dw1 = dw / self.opt.wadiv
             wa1 = np.arange(wa[0], wa[-1] + 0.5 * dw1, dw1)
-            tau, ticks = find_tau(wa1, lines, self.opt.atom)
+            tau, ticks = find_tau(wa1, lines, self.opt.atom,
+                                  logNthresh_LL=self.opt.logNthresh_LL)
         else:
-            tau, ticks = find_tau(wa, lines, self.opt.atom)
+            tau, ticks = find_tau(wa, lines, self.opt.atom,
+                                  logNthresh_LL=self.opt.logNthresh_LL)
 
         model = np.exp(-tau)
         # if we want to calculate the optical depth per line,
