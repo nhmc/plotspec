@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import os
 from math import sqrt
-from atpy import Table
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -46,7 +45,6 @@ T   Toggle tick labels.
 """
 
 prefix = os.path.abspath(__file__).rsplit('/', 1)[0]
-#dla_spec = Table(prefix + '/dla.fits')
 
 class PlotWrap(PlotWrapBase_Continuum):
     def __init__(self, filenames, fig, options):
