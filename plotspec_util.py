@@ -65,6 +65,7 @@ class PlotWrap(PlotWrapBase_Continuum):
         self.models = [None] * self.n          # cache optical depths
         temp = range(1, len(self.opt.linelist) + 1)
         #import pdb; pdb.set_trace()
+        
         self.linehelp = '\n'.join('%i: %s %.4f' % (i, r['name'], r['wa']) for
                                   i, r in zip(temp, self.opt.linelist))
         self.linehelp += '\nEnter transition: '
@@ -391,19 +392,6 @@ class PlotWrap(PlotWrapBase_Continuum):
             self.tfl = temp.fl
             self.update()
  
-        elif event.key == 'D' and event.inaxes is not None:
-            # print DLA spec (needs continuum)
-            z = event.xdata / 1215.6701 - 1
-            y = event.ydata
-            wa = dla_spec.wa * (1+z)
-            s = self.spec[self.i]
-            fl = np.interp(wa, s.wa, s.co) * dla_spec.fl
-            if self.artists['spec'] is not None:
-                self.artists['spec'].remove()
-
-            self.artists['spec'], = plt.plot(wa, fl, 'r')
-            self.update()
-
     def on_keypress_plotz(self, event):
         """ key to identify a line and assign a redshift
         """
@@ -425,6 +413,14 @@ class PlotWrap(PlotWrapBase_Continuum):
                     break
             zp1 = event.xdata / wa
             print 'z=%.3f, %s %.2f' % (zp1 - 1, ion, wa)
+        elif event.key == 'D':
+            # add a line (default just under a DLA)
+            zp1 = event.xdata / 1215.6701
+            print 'z=%.3f, Lya' % (zp1 - 1)
+        elif event.key == 'L':
+            # add a line (default just under a DLA)
+            zp1 = event.xdata / 912
+            print 'z=%.3f Lyman limit' % (zp1 - 1)
         else:
             return
         self.zp1 = zp1

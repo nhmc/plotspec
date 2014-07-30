@@ -200,10 +200,10 @@ def process_options(opt_args):
                 temp.append(dict(name=t[0], wa=t[1][0], tr=t[1]))
         opt.linelist = temp
     else:
-        opt.linelist = readtxt(get_data_path() + 'linelists/galaxy_lines',
+        #opt.linelist = readtxt(get_data_path() + 'linelists/galaxy_lines',
+        #                names='wa,name,select')
+        opt.linelist = readtxt(get_data_path() + 'linelists/qsoabs_lines',
                         names='wa,name,select')
-        #opt.linelist = readtxt(get_data_path() + 'linelists/qsoabs_lines',
-        #                names='name,wa,select')
 
     if opt.f26 is None and opt.taulines is not None:
         print 'Reading ions from', opt.taulines
