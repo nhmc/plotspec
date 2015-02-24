@@ -229,7 +229,7 @@ def process_Rfwhm(Rfwhm, wa, model, models):
     model: model flux array, shape (N,)
     models: list of model flux arrays each with shape (N,)
 
-    Rfwm is one of:
+    Rfwhm is one of:
 
       'convolve_with_COS_FOS'
       a float
