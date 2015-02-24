@@ -313,8 +313,10 @@ class PlotWrap(PlotWrapBase_Continuum):
                     w0, w1 = w1, w0
                 sp = self.spec[self.i]
                 good = between(sp.wa, w0, w1) & (sp.er > 0) & ~np.isnan(sp.fl)
-                print ('median fl, rms fl, median er, pixel width, '
-                       'SNR per pixel/Ang using rms, using er')
+
+                fmt1 = 'Median flux {:.3g}, rms {:.2g}, er {:.2g}. {:.2g} A/pix'
+                fmt2 = ('SNR {:.2g}/pix, {:.2g}/A (RMS), {:.2g}/pix, {:.2g}/A '
+                       '(er)')
                 if good.sum() < 2:
                     print 'Too few good pixels in range'
                     self.wlim1 = None
@@ -326,9 +328,8 @@ class PlotWrap(PlotWrapBase_Continuum):
                 mult = sqrt(1. / pixwidth)
                 snr1 = medfl / stdfl
                 snr2 = medfl / meder
-                print '%9.3g, %.3g, %.3g, %.2g, %.2g/%.2g, %.2g/%.2g' % (
-                    medfl, stdfl, meder, pixwidth, snr1, snr1 * mult,
-                    snr2, snr2 * mult)
+                print fmt1.format(medfl, stdfl, meder, pixwidth)
+                print fmt2.format(snr1, snr1 * mult, snr2, snr2 * mult)
                 self.wlim1 = None
             else:
                 for l in self.artists['mlines']:
