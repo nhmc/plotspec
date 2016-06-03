@@ -1,3 +1,5 @@
+from __future__ import print_function, absolute_import, division, unicode_literals
+
 import os
 
 import numpy as np
@@ -5,12 +7,14 @@ import matplotlib.transforms as mtransforms
 
 from barak.absorb import findtrans, readatom
 from barak.io import readtabfits, readtxt, parse_config
-from barak.utilities import adict, get_data_path
+from barak.utilities import adict, get_data_path, between
 from barak.pyvpfit import readf26
 from barak.constants import c_kms
 from barak.convolve import convolve_constant_dv
 from barak.sed import make_constant_dv_wa_scale
 from barak.convolve import convolve_psf
+
+from astropy.table import Table
 
 try:
     from COS import convolve_with_COS_FOS
@@ -46,7 +50,7 @@ def lines_from_f26(f26):
 
     lines = []
     for l in f26.lines:
-        print l['name']
+        print(l['name'])
         if l['name'].strip() in ('<<', '>>'):
             #print "skipping!"
             continue
@@ -80,30 +84,38 @@ def plot_tick_wa(ax, wa, fl, height, t, tickz=None):
     label = label.replace('NeVII', 'NeVIII')
 
     fl = fl * 1.1
-    T = ax.plot([wa, wa], [fl, fl + height], color='k', alpha=0.7, lw=1.5)
+    T = ax.plot([wa, wa], [fl, fl + height], color='c', alpha=0.7, lw=1.5)
 
     Tlabels = []
     if tickz is not None and not (1e-5 < abs(t.z - tickz) < 1e-2) or \
            tickz is None:
-        Tlabels.append(ax.text(wa, fl + 1.4 * height, label, rotation=60,
+        Tlabels.append(ax.text(wa, fl + 1.35 * height, label, rotation=60,
                     fontsize=8, va='bottom', alpha=0.7))
 
     return T, Tlabels
 
 
-def plotregions(ax, wmin, wmax):
+def plotregions(ax, wmin, wmax, wa, fl):
     """ Plot a series of fitting regions on the matplotlib axes `ax`.
     """
     trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
     regions = []
     for w0, w1 in zip(wmin, wmax):
-        r, = ax.plot([w0, w1], [0.8, 0.8], color='r', lw=3, alpha=0.7,
+        r0, = ax.plot([w0, w1], [0.8, 0.8], color='r', lw=3, alpha=0.7,
                      transform=trans)
-        regions.append(r)
+        c0 = between(wa, w0, w1)
+        r1, = ax.plot(wa[c0], fl[c0], color='y', lw=3, alpha=0.5,
+                     zorder=0, drawstyle='steps-mid')
+        
+        #r = ax.fill_betweenx([0, 0.8], w0, x2=w1, facecolor='b', alpha=0.2,
+        #                     lw=0, zorder=1,
+        #                     transform=trans)
+        regions.extend([r0, r1])
     return regions
 
 
-def plot_velocity_regions(wmin, wmax, w0, w1, obswa, ax, offset):
+def plot_velocity_regions(wmin, wmax, w0, w1, obswa, ax, offset,
+                          vel, nfl):
     """ wmin, wmax is minimum and maximum wavelengths of the plot.
 
     w0 and w1 are the min and max wavelengths of the fitting
@@ -121,14 +133,17 @@ def plot_velocity_regions(wmin, wmax, w0, w1, obswa, ax, offset):
     vel1 = (w1[cond] / obswa - 1) * c_kms
     for v0, v1 in zip(vel0, vel1):
         yoff = 1.1 + offset
-        R, = ax.plot([v0, v1], [yoff, yoff], 'r', lw=3, alpha=0.7)
-        regions.append(R)
+        R0, = ax.plot([v0, v1], [yoff, yoff], 'r', lw=3, alpha=0.7)
+        cond = between(vel, v0, v1)
+        R1, = ax.plot(vel[cond], nfl[cond] + offset, 'y', lw=4, alpha=0.5,
+                      drawstyle='steps-mid',zorder=0)
+        regions.extend([R0,R1])
 
     return regions
 
 
 def print_example_options():
-    print """\
+    print("""\
     Rfwhm = 6.67
     features = features_filename
     f26 = lines.f26
@@ -144,31 +159,30 @@ def print_example_options():
     show_oscillator_strength = False
     dv = 1000
     residuals = False
-    """
+    """)
 
-def process_options(opt_args):
+def process_options(args):
     opt = adict()
     filename = os.path.abspath(__file__).rsplit('/', 1)[0] + '/default.cfg'
     opt = parse_config(filename)
     if os.path.lexists('./plot.cfg'):
         opt = parse_config('./plot.cfg', opt)
 
-    opt.update(opt_args)
-
     opt.atom = readatom(molecules=True)
+
     if opt.Rfwhm is not None:
         if isinstance(opt.Rfwhm, basestring):
             if opt.Rfwhm == 'convolve_with_COS_FOS':
                 if convolve_with_COS_FOS is None:
                     raise ValueError('convolve_with_COS_FOS() not available')
-                print 'Using tailored FWHM for COS/FOS data'
+                print('Using tailored FWHM for COS/FOS data')
                 opt.Rfwhm = 'convolve_with_COS_FOS'
             elif opt.Rfwhm.endswith('fits'):
-                print 'Reading Resolution FWHM from', opt.Rfwhm
+                print('Reading Resolution FWHM from', opt.Rfwhm)
                 res = readtabfits(opt.Rfwhm)
                 opt.Rfwhm = res.res / 2.354
             else:
-                print 'Reading Resolution FWHM from', opt.Rfwhm
+                print('Reading Resolution FWHM from', opt.Rfwhm)
                 fh = open(opt.Rfwhm)
                 opt.Rfwhm = 1 / 2.354 * np.array([float(r) for r in fh])
                 fh.close()
@@ -176,17 +190,17 @@ def process_options(opt_args):
             opt.Rfwhm = float(opt.Rfwhm)
 
     if opt.features is not None:
-        print 'Reading feature list from', opt.features
+        print('Reading feature list from', opt.features)
         opt.features = readtabfits(opt.features)
 
     if opt.f26 is not None:
         name = opt.f26
-        print 'Reading ions and fitting regions from', name
+        print('Reading ions and fitting regions from', name)
         opt.f26 = readf26(name)
         opt.f26.filename = name
 
     if opt.transitions is not None:
-        print 'Reading transitions from', opt.transitions
+        print('Reading transitions from', opt.transitions)
         fh = open(opt.transitions)
         trans = list(fh)
         fh.close()
@@ -200,22 +214,26 @@ def process_options(opt_args):
                 temp.append(dict(name=t[0], wa=t[1][0], tr=t[1]))
         opt.linelist = temp
     else:
-        #opt.linelist = readtxt(get_data_path() + 'linelists/galaxy_lines',
-        #                names='wa,name,select')
         opt.linelist = readtxt(get_data_path() + 'linelists/qsoabs_lines',
                         names='wa,name,select')
 
     if opt.f26 is None and opt.taulines is not None:
-        print 'Reading ions from', opt.taulines
+        print('Reading ions from', opt.taulines)
         fh = open(opt.taulines)
         lines = []
         for row in fh:
             if row.lstrip().startswith('#'):
                 continue
             items = row.split()
-            lines.append([items[0]] + map(float, items[1:]))
+            lines.append([items[0]] + list(map(float, items[1:])))
         fh.close()
         opt.lines = lines
+
+    if opt.show_regions is None:
+        opt.show_regions = True
+
+    if hasattr(opt, 'aodname'):
+        opt.aod = Table.read(opt.aodname)
 
     return opt
 
@@ -277,18 +295,3 @@ def process_Rfwhm(Rfwhm, wa, model, models):
     return model_out, models_out
 
 
-def process_args(args):
-    out = []
-    option = {}
-    for arg in args:
-        if '=' in arg:
-            key, val = arg.split('=')
-            try:
-                val = float(val)
-            except ValueError:
-                pass
-            option[key] = val
-        else:
-            out.append(arg)
-
-    return out, option

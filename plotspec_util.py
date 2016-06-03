@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+from __future__ import print_function, absolute_import, division, unicode_literals
+
 import os
 from math import sqrt
 
@@ -11,10 +13,16 @@ import barak.spec
 from barak.sed import get_SEDs
 from barak.utilities import between, indexnear
 from barak.convolve import convolve_psf
-from barak.absorb import find_tau
+from barak.absorb import find_tau, calc_DLA_trans
 from barak.plot import axvlines#, get_flux_plotrange
 from plotspec.utils import process_options, plotregions, process_Rfwhm, \
-     plot_tick_wa, process_args, lines_from_f26
+     plot_tick_wa, lines_from_f26
+
+
+try:
+    raw_input
+except NameError:
+    raw_input = input
 
 # read in one or more spectra.  left and right arrows to switch between them
 
@@ -57,11 +65,13 @@ class PlotWrap(PlotWrapBase_Continuum):
             options.z = 0
         self.nsmooth = options.nsmooth
         self.zp1 = options.z + 1
+        self.NHI = 20.3
+        self.DLA = None
         self.contpoints = []
         self.n = len(self.filenames)
         self.spec = [None] * self.n          # cache spectra
         self.twa = []
-        self.tfl = []
+        self.tfl = None
         self.models = [None] * self.n          # cache optical depths
         temp = range(1, len(self.opt.linelist) + 1)
         #import pdb; pdb.set_trace()
@@ -85,11 +95,12 @@ class PlotWrap(PlotWrapBase_Continuum):
         self.artists['mlines'] = []
         self.artists['ticklabels'] = []
         self.artists['ticks'] = []
+        self.artists['model'] = []
         self.wlim1 = None
         self.prev_wa = None
         self.get_new_spec(0)
         self.outdir = ''
-        print help
+        print(help)
 
     def get_new_spec(self, i):
         """ Change to a new spectrum
@@ -97,7 +108,7 @@ class PlotWrap(PlotWrapBase_Continuum):
         self.i = i
         filename = self.filenames[i]
         if self.spec[i] is None:
-            print 'Reading %s' % filename
+            print('Reading %s' % filename)
             self.spec[i] = barak.spec.read(filename)
             self.models[i] = None
             self.ticks = None
@@ -106,16 +117,23 @@ class PlotWrap(PlotWrapBase_Continuum):
 
         s = self.spec[i]
         self.ax.cla()
+        if 'norm' in self.opt and self.opt.norm:
+            s.fl = s.fl / s.co
+            s.er = s.er / s.co
+            s.co = np.ones_like(s.co)
+
         co = s.co
         if self.opt.co_is_sky:
             co = s.co * np.median(s.fl) / np.median(s.co) * 0.1
         self.artists['spec'] = barak.spec.plot(
-            s.wa, s.fl, s.er, co, ax=self.ax, show=0, yperc=0.90)
+            s.wa, s.fl, s.er, co, ax=self.ax, show=0, yperc=0.90,
+            flcolor='0.5')
         self.artists['fl'] = self.artists['spec'][0]
         self.artists['co'] = self.artists['spec'][2]
-        if self.nsmooth > 0:
-            sfl = convolve_psf(s.fl, self.nsmooth, edge='reflect')
-            self.artists['fl'].set_data(s.wa, sfl)
+        self.artists['model']= self.ax.plot([],[], 'k')[0]
+        # if self.nsmooth > 0:
+        #     sfl = convolve_psf(s.fl, self.nsmooth, edge='reflect')
+        #     self.artists['fl'].set_data(s.wa, sfl)
         self.artists['template'], = self.ax.plot([], [], 'y')
         self.artists['contpoints'], = self.ax.plot(
             [0], [0], 'x', mfc='None', mew=0.5, ms=8, mec='r')
@@ -125,18 +143,24 @@ class PlotWrap(PlotWrapBase_Continuum):
             offsets=False)
 
         self.artists['lines'] = line_artists
+        if 'walim' in self.opt:
+            w0,w1 = map(float, self.opt.walim.split())
+            self.ax.set_xlim(w0,w1)
 
         self.fl = s.fl
         self.wa = s.wa
+        # dispersion per pixel
+        self.dvpix = np.median(np.diff(s.wa)) / np.median(s.wa) * 3e5
         self.co = co
         self.name = self.filenames[i]
 
 
     def calc_model(self):
         lines = lines_from_f26(self.opt.f26)
+        lines = [l for l in lines if l[0] not in ('__', '<>')]
         wa = self.spec[self.i].wa
         dw = np.median(np.diff(wa))
-        print 'finding tau'
+        print('finding tau')
         if self.opt.wadiv is not None:
             dw1 = dw / self.opt.wadiv
             wa1 = np.arange(wa[0], wa[-1] + 0.5 * dw1, dw1)
@@ -158,6 +182,8 @@ class PlotWrap(PlotWrapBase_Continuum):
         if self.opt.wadiv is not None:
             model = np.interp(wa, wa1, model)
 
+        #self.apply_zero_offsets()
+
         self.models[self.i] = model
         self.ticks = ticks
         self.model = model
@@ -168,7 +194,7 @@ class PlotWrap(PlotWrapBase_Continuum):
         regions = self.opt.f26.regions
         isort = regions.wmin.argsort()
         zeros = l[l.name == '__']
-        print 'applying zero offsets for', len(zeros), 'regions'
+        print('applying zero offsets for', len(zeros), 'regions')
         for val in zeros:
             wa = self.opt.atom['__'].wa[0] * (1 + val['z'])
             i0 = regions.wmin[isort].searchsorted(wa)
@@ -179,7 +205,7 @@ class PlotWrap(PlotWrapBase_Continuum):
             c0 = between(self.spec[self.i].wa, regions.wmin[isort[i0 - 1]],
                          regions.wmax[isort[i1]])
             m = model[c0] * (1. - val['logN']) + val['logN']
-            #import pdb; pdb.set_trace()
+            import pdb; pdb.set_trace()
             model[c0] = m
 
         self.spec[self.i].model = model
@@ -192,18 +218,30 @@ class PlotWrap(PlotWrapBase_Continuum):
         s = self.spec[i]
         wa, fl, er, co = s.wa, s.fl, s.er, s.co
         if self.models[i] is not None and (co > 0).any():
-            temp = co * self.models[i]
-            a.plot(wa, temp, color='orange')
-        a.set_title(self.filenames[i])
+            if 'norm' in self.opt and self.opt.norm:
+                temp = self.models[i]
+            else:
+                temp = co * self.models[i]
+            a.plot(wa, temp, color='k')
+        #a.set_title(self.filenames[i])
         if self.zp1 is not None:
             self.update_lines()
         if self.ticks is not None:
             if not np.isnan(co).all() and not self.opt.co_is_sky:
-                f = np.interp(self.ticks.wa, wa, co)
+                if 'norm' in self.opt and self.opt.norm:
+                    f = np.ones_like(self.ticks.wa)
+                else:
+                    f = np.interp(self.ticks.wa, wa, co)
             else:
-                f = np.interp(self.ticks.wa, wa, fl)
+                if 'norm' in self.opt and self.opt.norm:
+                    f = np.interp(self.ticks.wa, wa, fl/co)
+                else:
+                    f = np.interp(self.ticks.wa, wa, fl)
 
-            height = 0.08 * np.percentile(fl, 90)
+            if 'norm' in self.opt and self.opt.norm:
+                height = 0.08
+            else:
+                height = 0.08 * np.percentile(fl, 90)
             for j, t in enumerate(self.ticks):
                 if self.opt.showticks:
                     T, Tlabels = plot_tick_wa(a, t.wa, f[j], height, t,
@@ -211,9 +249,13 @@ class PlotWrap(PlotWrapBase_Continuum):
                     self.artists['ticks'].extend(T)
                     self.artists['ticklabels'].extend(Tlabels)
 
-        if self.opt.f26 is not None and self.opt.f26.regions is not None:
+        if self.opt.f26 is not None and self.opt.f26.regions is not None and \
+               self.opt.show_regions:
+            f = fl
+            if 'norm' in self.opt and self.opt.norm:
+                f = self.fl / self.co
             plotregions(a, self.opt.f26.regions.wmin,
-                        self.opt.f26.regions.wmax)
+                        self.opt.f26.regions.wmax, wa, f)
 
         if self.opt.features is not None:
             f = self.opt.features
@@ -229,8 +271,9 @@ class PlotWrap(PlotWrapBase_Continuum):
                 a.text(f['wac'], ymax[j] + ref * 0.05, f['num'], ha='center',
                        fontsize=12, color='g')
 
-        fl = self.tfl * np.median(s.fl) / np.median(self.tfl)
-        self.artists['template'].set_data(self.twa, fl)
+        if self.tfl is not None:
+            fl = self.tfl * np.median(s.fl[er > 0]) / np.median(self.tfl)
+            self.artists['template'].set_data(self.twa, fl)
 
         if not self.opt.ticklabels:
             for t in self.artists['ticklabels']:
@@ -253,6 +296,14 @@ class PlotWrap(PlotWrapBase_Continuum):
         self.artists['lines'] = barak.spec.plotlines(
             self.zp1 - 1, self.ax, labels=1, fontsize=10,
             lcolor='0.3', lines=self.lines, offsets=False)
+
+        if self.DLA is not None:
+            self.artists['model'].remove()
+            s = self.spec[self.i]
+            t,_ = calc_DLA_trans(s.wa, self.zp1-1, 2*self.dvpix,
+                                 logN=self.DLA, bHI=15) 
+            self.artists['model'] = self.ax.plot(
+                s.wa, t*s.co, 'k')[0]
         #if not self.showlabels:
         #    for t in self.artists['lines']['labels']:
         #        t.set_visible(False)
@@ -268,25 +319,26 @@ class PlotWrap(PlotWrapBase_Continuum):
         # self.artists['zlines'] = barak.spec.plotlines(
         #     zp1 - 1, plt.gca(), lines=self.opt.linelist, labels=True)
         # plt.draw()
+        print('z =', self.zp1-1)
 
     def on_keypress_custom(self, event):
-        if event.key == 'right':
+        if event.key == 'pagedown':
             if self.i == self.n - 1:
-                print 'At the last spectrum.'
+                print('At the last spectrum.')
                 return
             self.artists['zlines'] = []
             self.get_new_spec(self.i + 1)
             self.update()
 
-        elif event.key == 'left':
+        elif event.key == 'pageup':
             if self.i == 0:
-                print 'At the first spectrum.'
+                print('At the first spectrum.')
                 return
             self.artists['zlines'] = []
             self.get_new_spec(self.i - 1)
             self.update()
         elif event.key == '?':
-            print help
+            print(help)
         elif event.key == 'T':
             if self.opt.ticklabels:
                 for t in self.artists['ticklabels']:
@@ -300,9 +352,9 @@ class PlotWrap(PlotWrapBase_Continuum):
                         t.set_visible(True)
             self.fig.canvas.draw()
         elif event.key == ' ' and event.inaxes is not None:
-            print '%.4f  %.4f %i' % (
+            print('%.4f  %.4f %i' % (
                 event.xdata, event.ydata,
-                indexnear(self.spec[self.i].wa, event.xdata))
+                indexnear(self.spec[self.i].wa, event.xdata)))
         elif event.key == 'm' and event.inaxes is not None:
             if self.wlim1 is not None:
                 self.artists['mlines'].append(plt.gca().axvline(
@@ -315,10 +367,10 @@ class PlotWrap(PlotWrapBase_Continuum):
                 good = between(sp.wa, w0, w1) & (sp.er > 0) & ~np.isnan(sp.fl)
 
                 fmt1 = 'Median flux {:.3g}, rms {:.2g}, er {:.2g}. {:.2g} A/pix'
-                fmt2 = ('SNR {:.2g}/pix, {:.2g}/A (RMS), {:.2g}/pix, {:.2g}/A '
+                fmt2 = ('SNR {:.3g}/pix, {:.3g}/A (RMS), {:.3g}/pix, {:.3g}/A '
                        '(er)')
                 if good.sum() < 2:
-                    print 'Too few good pixels in range'
+                    print('Too few good pixels in range')
                     self.wlim1 = None
                     return
                 medfl = np.median(sp.fl[good])
@@ -328,8 +380,8 @@ class PlotWrap(PlotWrapBase_Continuum):
                 mult = sqrt(1. / pixwidth)
                 snr1 = medfl / stdfl
                 snr2 = medfl / meder
-                print fmt1.format(medfl, stdfl, meder, pixwidth)
-                print fmt2.format(snr1, snr1 * mult, snr2, snr2 * mult)
+                print(fmt1.format(medfl, stdfl, meder, pixwidth))
+                print(fmt2.format(snr1, snr1 * mult, snr2, snr2 * mult))
                 self.wlim1 = None
             else:
                 for l in self.artists['mlines']:
@@ -342,7 +394,7 @@ class PlotWrap(PlotWrapBase_Continuum):
                     event.xdata,  color='k', alpha=0.3))
                 plt.draw()
                 self.wlim1 = event.xdata
-                print "press 'm' again..."
+                print("press 'm' again...")
 
         elif event.key == 'C':
             # fit dodgy continuum
@@ -352,7 +404,7 @@ class PlotWrap(PlotWrapBase_Continuum):
             plt.draw()
             c = raw_input('Accept continuum? (y) ')
             if (c + ' ').lower()[0] != 'n':
-                print 'Accepted'
+                print('Accepted')
                 sp.co = co
                 self.update()
             else:
@@ -366,7 +418,8 @@ class PlotWrap(PlotWrapBase_Continuum):
                 wmax = wa
                 if wmin > wmax:
                     wmin, wmax = wmax, wmin
-                print '%%%% %s 1 %.3f %.3f vsig=x.x' % (self.filenames[self.i], wmin, wmax)
+                print('%%%% %s 1 %.3f %.3f vsig=x.x' % (
+                    self.filenames[self.i], wmin, wmax))
                 self.prev_wa = None
             else:
                 self.prev_wa = wa
@@ -375,7 +428,7 @@ class PlotWrap(PlotWrapBase_Continuum):
             # print HI line
             wa = event.xdata
             z = wa / 1215.6701 - 1
-            print '%-6s %8.6f 0.0 %3.0f 0.0 %4.1f 0.0' % ('HI', z, 20, 14.0)
+            print('%-6s %8.6f 0.0 %3.0f 0.0 %4.1f 0.0' % ('HI', z, 20, 14.0))
 
         elif event.key == 'E':
             # overplot a template
@@ -392,7 +445,12 @@ class PlotWrap(PlotWrapBase_Continuum):
             self.twa = temp.wa
             self.tfl = temp.fl
             self.update()
- 
+
+        elif event.key == ')':
+            self.ax.set_xlabel('$\mathrm{Wavelength\ (\AA)}$')
+            self.ax.set_ylabel('$F_\lambda\ \mathrm{(arbitrary)}$')
+            self.update()
+
     def on_keypress_plotz(self, event):
         """ key to identify a line and assign a redshift
         """
@@ -403,7 +461,7 @@ class PlotWrap(PlotWrapBase_Continuum):
             # id line to get redshift
             while True:
                 c = raw_input(self.linehelp)
-                print c
+                print(c)
                 try:
                     i = int(c) - 1
                     ion = self.opt.linelist[i]['name']
@@ -413,15 +471,28 @@ class PlotWrap(PlotWrapBase_Continuum):
                 else:
                     break
             zp1 = event.xdata / wa
-            print 'z=%.3f, %s %.2f' % (zp1 - 1, ion, wa)
+            print('z=%.3f, %s %.2f' % (zp1 - 1, ion, wa))
         elif event.key == 'D':
             # add a line (default just under a DLA)
             zp1 = event.xdata / 1215.6701
-            print 'z=%.3f, Lya' % (zp1 - 1)
+            print('z=%.3f, Lya' % (zp1 - 1))
+            s = self.spec[self.i]
+            self.DLA = 20.3                
         elif event.key == 'L':
             # add a line (default just under a DLA)
+            self.DLA = 20.3
             zp1 = event.xdata / 912
-            print 'z=%.3f Lyman limit' % (zp1 - 1)
+            print('z=%.3f Lyman limit' % (zp1 - 1))
+        elif event.key == 'right':
+            zp1 = self.zp1*(1 + 2 * self.dvpix / 3e5)
+            #print self.zp1 -1 , zp1 - 1
+        elif event.key == 'left':
+            zp1 = self.zp1*(1 - 2 * self.dvpix / 3e5)
+            #print self.zp1 -1 , zp1 - 1
+        elif event.key == 'Z':
+            c = raw_input('Enter redshift: ')
+            zp1 = float(c) + 1
+            # set the redshift
         else:
             return
         self.zp1 = zp1
@@ -440,15 +511,12 @@ class PlotWrap(PlotWrapBase_Continuum):
         self.cids.extend(cids)
 
 def main(args):
-    if len(args) < 1:
-        print usage
-        return
 
-    args, opt_args = process_args(args)
-    options = process_options(opt_args)
+    options = process_options(args)
 
-    fig = plt.figure(figsize=(15, 6))
+    #fig = plt.figure(figsize=(15, 6))
+    fig = plt.figure(figsize=(6, 3))
     fig.subplots_adjust(left=0.04, right=0.98)
-    wrap = PlotWrap(args, fig, options)
+    wrap = PlotWrap(args.filename, fig, options)
     wrap.update()
     plt.show()

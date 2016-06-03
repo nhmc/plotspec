@@ -11,16 +11,19 @@ from barak.plot import A4PORTRAIT
 from barak.utilities import indexnear, stats, between, adict
 from barak.convolve import convolve_psf
 from barak.absorb import calc_Wr, findtrans, \
-     calc_iontau, guess_logN_b, calc_N_AOD
+     calc_iontau, guess_logN_b, calc_N_AOD, readatom, split_trans_name
 from barak.pyvpfit import readf26
 from plotspec.utils import \
      process_options, plot_velocity_regions, process_Rfwhm, plot_tick_vel, \
-     ATMOS, process_args, lines_from_f26
+     ATMOS, lines_from_f26
 
 # expand continuum adjsutments this many Ang either side of the
 # fitting region.
 
-expand_cont_adjustment = 10
+ATOMDAT = readatom()
+HIwavs = ATOMDAT['HI']['wa'][::-1]
+
+expand_cont_adjustment = 0
 
 np.seterr(divide='ignore', invalid='ignore')
 unrelated = []
@@ -69,13 +72,15 @@ b            Print fitting region at position of cursor.
 l            Print line at position of cursor, guessing N and b.
 H            Same as 'l', but the line is always HI.
 p            Print the wavelength at the cursor position.
+i/o          zoom in and out.
+y            zoom y around the continuum. Y resets.
 
 P            Make a plot of the current figure.
 
-L            Add an HI Lya transition (only) at the cursor.
+L            Add HI Lya transition (only) at the cursor.
 R            Re-read the f26 file and generate new models.
 
-f5           Toggle tick labels on and off.
+T            Toggle tick labels on and off.
 """
 
 wlya = 1215.6701
@@ -84,7 +89,7 @@ wlyg = 972.5368
 c_kms = 299792.458         # speed of light km/s, exact
 
 
-def initvelplot(wa, nfl, ner, nco, transitions, z, fig, atom,
+def initvelplot(wa, nfl, ner, nco, transitions, z, fig, atom, ncol,
                 vmin=-1000., vmax=1000., nmodels=0,
                 osc=False, residuals=False):
     """ Vertical stacked plots of expected positions of absorption
@@ -107,24 +112,24 @@ def initvelplot(wa, nfl, ner, nco, transitions, z, fig, atom,
 
     fig.subplots_adjust(wspace=0.0001, left=0.03, right=0.97, top=0.95,
                         bottom=0.07)
-    ax1 = pl.subplot(122)
-    ax2 = pl.subplot(121)
-    axes = [ax1, ax2]
+    axes = []
+    for i in range(ncol):
+        axes.append(pl.subplot(1, ncol, i+1))
+    axes = axes[::-1]
     for ax in axes:
         ax.set_autoscale_on(0)
     # plot top down, so we need reversed()
     offsets = []
-    artists = dict(fl=[], er=[], co=[], resid=[], text=[], model=[], models=[],
-                   ew=None, regions=[], ticklabels=[], ticks=[])
+    artists = dict(fl=[], er=[], co=[], resid=[], text=[], model=[], models={},
+                   ew=None, regions=[], ticklabels=[], ticks=[], aod=[])
 
-    num_per_panel = int(ceil(0.5 * len(transitions)))
+    num_per_panel = int(ceil(1/float(ncol) * len(transitions)))
     for i, trans in enumerate(reversed(transitions)):
-        ax = ax1
-        if i >= num_per_panel:
-            i -= num_per_panel
-            ax = ax2
+        tr_id = trans['name'], tuple(trans['tr'])
+        iax, ioff = divmod(i, num_per_panel)
+        ax = axes[iax]
         ion = trans['name'].split()[0]
-        offset = i * 1.5
+        offset = ioff * 1.5
         #print i, offset
         offsets.append(offset)
         watrans = trans['wa']
@@ -143,20 +148,18 @@ def initvelplot(wa, nfl, ner, nco, transitions, z, fig, atom,
         ax.axhline(offset, color='gray', lw=0.5)
         #artists['er'].extend(
         #    ax.plot(vel, er + offset, lw=1, color='orange', alpha=0.5) )
+        
         artists['fl'].extend(
             ax.plot(vel, fl + offset, color=colour[ion], lw=0.5,
                     ls='steps-mid'))
         artists['co'].extend(
             ax.plot(vel, co + offset, color='gray', lw=0.5, ls='dashed'))
-
-        if nmodels > 0:
-            artists['models'].append([ax.plot(vel, co + offset, 'k', lw=0.2)[0]
-                                      for j in range(nmodels)])
         artists['model'].extend(
-            ax.plot(vel, co + offset, 'k', lw=0.5, zorder=12))
+            ax.plot(vel, co + offset, 'k', lw=1, zorder=12))
+        artists['models'][tr_id] = {}
         if residuals:
             artists['resid'].extend(
-                ax.plot([], [], '.', ms=3, mew=0, alpha=0.4, color='forestgreen'))
+                ax.plot([], [], '.', ms=3, mew=0, color='forestgreen'))
             #ax.axhline(offset-0.1, color='k', lw=0.3)
             ax.axhline(offset - 0.05, color='k', lw=0.3)
             ax.axhline(offset - 0.15, color='k', lw=0.3)
@@ -164,6 +167,13 @@ def initvelplot(wa, nfl, ner, nco, transitions, z, fig, atom,
         transf = mtransforms.blended_transform_factory(
             ax.transAxes, ax.transData)
         name = trans['name']
+        #import pdb; pdb.set_trace()
+        if name.startswith('HI'):
+            ind = indexnear(HIwavs, trans['wa'])
+            lynum = len(HIwavs) - ind
+            name = 'Ly' + str(lynum) + ' ' + name[2:]
+            # find Ly transition number
+            
         if 'tr' in trans and osc:
             name = name + ' %.3g' % trans['tr']['osc']
         artists['text'].append(
@@ -175,9 +185,10 @@ def initvelplot(wa, nfl, ner, nco, transitions, z, fig, atom,
         ax.set_xlim(vmin, vmax)
         ax.set_ylim(-0.5, num_per_panel * 1.5)
         ax.set_yticks([])
-        ax.set_xlabel('Velocity offset (km s$^{-1}$)', fontsize=16)
+        ax.set_xlabel(r'$\Delta v\ \mathrm{(km/s)}$', fontsize=16)
     artists['title'] = pl.suptitle('$z = %.5f$' % z, fontsize=18)
     artists['sky'] = []
+
 
     return artists, np.array(offsets[:num_per_panel]), num_per_panel, axes
 
@@ -208,6 +219,7 @@ class VelplotWrap(object):
         self.vmax = options.dv
         self.prev_wa = None
         self.indprev = None
+        self.ymult = 1
 
         dw = np.median(dwa)
         if options.wadiv is not None:
@@ -225,10 +237,12 @@ class VelplotWrap(object):
             self.apply_zero_offsets()
             self.apply_cont_adjustments()
 
+        ncol = 2 if 'ncol' not in options else options.ncol
+
         artists, offsets, num_per_panel, axes = initvelplot(
             wa, nfl, ner, self.co, options.linelist, options.z, fig,
-            options.atom, vmin=-options.dv, vmax=options.dv,
-            nmodels=0, osc=options.show_oscillator_strength,
+            options.atom, ncol, vmin=-options.dv, vmax=options.dv,
+            nmodels=len(self.models), osc=options.show_oscillator_strength,
             residuals=options.residuals)
         self.offsets = offsets
         self.num_per_panel = num_per_panel
@@ -249,6 +263,9 @@ class VelplotWrap(object):
             del self.taus[l]
             del self.models[l]
             del self.ticks[l]
+            for tr_id in self.artists['models']:
+                self.artists['models'][tr_id][l].remove()
+                del self.artists['models'][tr_id][l]
 
         dtype = np.dtype([('name', 'S10'), ('wa', 'f8'), ('z', 'f8'),
                           ('wa0', 'f8'), ('ind', 'i4')])
@@ -272,6 +289,7 @@ class VelplotWrap(object):
                 temp = np.rec.fromarrays([ions] + zip(*tick), dtype=dtype)
             self.ticks[l] = temp
 
+
         self.allticks = []
         if len(self.ticks) > 0:
             self.allticks =  np.concatenate(
@@ -287,10 +305,10 @@ class VelplotWrap(object):
     def convolve_LSF(self):
         print 'convolving'
         if self.opt.wadiv is not None:
-            self.model, _ = process_Rfwhm(
+            self.model, models = process_Rfwhm(
                 self.opt.Rfwhm, self.wa1, self.model, [])
         else:
-            self.model, _ = process_Rfwhm(
+            self.model, models = process_Rfwhm(
                 self.opt.Rfwhm, self.wa, self.model, [])
 
         if self.opt.wadiv is not None:
@@ -358,6 +376,8 @@ class VelplotWrap(object):
 
         self.z = z
 
+        ymult = self.ymult
+
         zp1 = z + 1
         betamin = self.vmin / c_kms
         betamax = self.vmax / c_kms
@@ -371,20 +391,27 @@ class VelplotWrap(object):
         if artists['ew'] is not None:
             artists['ew'].remove()
             artists['ew'] = None
+
+
         for r in artists['regions']:
             r.remove()
         for s in artists['sky']:
             s.remove()
+        for s in artists['aod']:
+            s.remove()
         artists['regions'] = []
         artists['sky'] = []
+        artists['aod'] = []
 
         # want plots to appear from  top down, so we need reversed()
         for i, trans in enumerate(reversed(options.linelist)):
-            ax = self.axes[0]
-            offset = i * 1.5
-            if i >= self.num_per_panel:
-                offset = (i - self.num_per_panel) * 1.5
-                ax = self.axes[1]
+            atom, ion = split_trans_name(trans['name'].split()[0])
+            iax, ioff = divmod(i, self.num_per_panel)
+            ax = self.axes[iax]
+            offset = ioff * 1.5
+            #if i >= self.num_per_panel:
+            #    offset = (i - self.num_per_panel) * 1.5
+            #    ax = self.axes[1]
 
             watrans = trans['wa']
             obswa = watrans * zp1
@@ -403,22 +430,42 @@ class VelplotWrap(object):
                                                   tickz=options.tickz)
                         artists['ticklabels'].extend(Tlabels)
                         artists['ticks'].extend(T)
-            if options.f26 is not None and options.f26.regions is not None:
-                artists['regions'].extend(plot_velocity_regions(
-                    wmin, wmax, options.f26.regions.wmin,
-                    options.f26.regions.wmax,
-                    obswa, ax, offset))
+
 
             cond = between(wa, wmin, wmax)
             #good = ~np.isnan(fl) & (er > 0) & ~np.isnan(co)
 
             # remove ultra-low S/N regions to help plotting
             cond &= ner < 1.5
+            cond &= ymult*(nfl-1) + 1 > -0.1
                 
             fl = nfl[cond]
             co = nco[cond]
 
             vel = (wa[cond] / obswa - 1) * c_kms
+
+            if options.f26 is not None and options.f26.regions is not None:
+                artists['regions'].extend(plot_velocity_regions(
+                    wmin, wmax, options.f26.regions.wmin,
+                    options.f26.regions.wmax,
+                    obswa, ax, offset, vel, ymult*(fl-1) + 1))
+
+            #import pdb; pdb.set_trace()
+            if hasattr(options, 'aod'):
+                # print ranges used for AOD calculation.
+                # find the right transition
+                c0 = ((np.abs(options.aod['wrest'] - trans['wa']) < 0.01) &
+                      (options.aod['atom'] == atom))
+                itrans = np.flatnonzero(c0)
+                for row in options.aod[itrans]:
+                    c0 = between(wa[cond], row['wmin'], row['wmax'])
+                    if np.any(c0):
+                        artists['aod'].append(
+                            ax.fill_between(vel[c0], offset, offset+1.5, facecolor='0.8', lw=0,
+                                            zorder=0)
+                            )
+                    
+
             vranges = []
             for w0, w1 in unrelated:
                 c0 = between(wa[cond], w0, w1)
@@ -436,11 +483,12 @@ class VelplotWrap(object):
                 if len(fl) > 3 * self.smoothby:
                     fl = convolve_psf(fl, self.smoothby)
 
+
             artists['fl'][i].set_xdata(vel)
-            artists['fl'][i].set_ydata(fl + offset)
+            artists['fl'][i].set_ydata(ymult*(fl-1) + 1 + offset)
 
             artists['co'][i].set_xdata(vel)
-            artists['co'][i].set_ydata(co + offset)
+            artists['co'][i].set_ydata(ymult*(co-1) + 1 + offset)
 
             #pdb.set_trace()
 
@@ -452,7 +500,18 @@ class VelplotWrap(object):
 
             if self.opt.f26 is not None:
                 artists['model'][i].set_xdata(vel)
-                artists['model'][i].set_ydata(model[cond] + offset)
+                artists['model'][i].set_ydata(ymult*(model[cond]-1) + 1 + offset)
+
+            tr_id = trans['name'], tuple(trans['tr'])
+            #import pdb; pdb.set_trace()
+            art = self.artists['models'][tr_id]
+            for line in self.models:                
+                m  = self.models[line]
+                if line not in art:
+                    art[line] = ax.plot(vel, ymult*(m[cond]-1) + 1 + offset, 'k', lw=0.2)[0]
+                else:
+                    art[line].set_xdata(vel)
+                    art[line].set_ydata(ymult*(m[cond]-1) + 1 + offset)
 
         for ax in self.axes:
             ax.set_xlim(self.vmin, self.vmax)
@@ -478,8 +537,9 @@ class VelplotWrap(object):
         """
         if event.key == 'S':
             pl.savefig('junk.png', dpi=300)
-
-        elif event.key == 'f5':
+        elif event.key == '?':
+            print help
+        elif event.key == 'T':
             if self.opt.ticklabels:
                 for t in self.artists['ticklabels']:
                     t.set_visible(False)
@@ -499,6 +559,22 @@ class VelplotWrap(object):
                 self.apply_zero_offsets()
                 self.apply_cont_adjustments()
             self.update(self.z)
+        elif event.key == 'i':
+            for ax in self.axes:
+                v0,v1 = ax.get_xlim()
+                ax.set_xlim(0.66*v0, 0.66*v1)
+            self.fig.canvas.draw()
+        elif event.key == 'o':
+            for ax in self.axes:
+                v0,v1 = ax.get_xlim()
+                ax.set_xlim(1.33*v0, 1.33*v1)
+            self.fig.canvas.draw()
+        elif event.key == 'y':
+            self.ymult *= 1.33
+            self.update(self.z)
+        elif event.key == 'Y':
+            self.ymult = 1
+            self.update(self.z)
         elif event.key == ' ' and event.inaxes is not None:
             z = self.z
             # get new redshift
@@ -516,8 +592,10 @@ class VelplotWrap(object):
             if i == 0:
                 i = len(self.opt.linelist)
             off = self.offsets[i - 1]
-            if event.inaxes == self.axes[1]:
-                i += self.num_per_panel
+            iax = self.axes.index(event.inaxes)
+            i += iax * self.num_per_panel
+            #if event.inaxes == self.axes[1]:
+            #    i += self.num_per_panel
             tr = self.opt.linelist[-i]
             z = (1 + event.xdata / c_kms) * (1 + self.z) - 1
             wa = tr['wa'] * (1 + z)
@@ -592,26 +670,33 @@ class VelplotWrap(object):
                 if i0 > i1:
                     i0, i1 = i1, i0
                 f = calc_Wr(i0, i1, wa, tr['tr'], self.ew, self.ewer)
-                print '%s z=%.6f  Wr=%.3f+/-%.3fA  ngoodpix=%3i  wa=%.3f-%.3f ' % (
-                    tr['name'], f.zp1-1, f.Wr, f.Wre,  f.ngoodpix, wa[i0], wa[i1])
-                print '  Optically thin approx: logN=%.4f (%.3f-%.3f) 5sig detect lim %.4f' % (
+                print '%s z=%.6f  Wr=%.3f+/-%.3fA  ngoodpix=%3i  wa=%.3f %.3f v=%.1f-%.1f' % (
+                    tr['name'], self.z, f.Wr, f.Wre,  f.ngoodpix, wa[i0], wa[i1],
+                    self.xprev, event.xdata)
+                print '  Opt. thin approx: logN=%.4f (%.3f-%.3f) 1sig detect lim %.4f' % (
                     f.logN[1], f.logN[0], f.logN[2], f.Ndetlim)
-                # Assume continuum error of 2 sigma, zero point error
-                # of two sigma. Currently this is done per pixel,
-                # would be better to do it per region. No problem as
-                # long as error doesn't vary much over the region.
+                # Assume continuum error of 0.5 sigma, zero point error
+                # of 0.5 sigma.
                 logNlo, logN, logNhi, saturated = calc_N_AOD(
                     self.wa[i0:i1], self.nfl[i0:i1], self.ner[i0:i1],
-                    2, 2, 1, 1, tr['tr']['wa'], tr['tr']['osc'])
-                print '   AOD: logN=%.4f (%.3f-%.3f)  Saturated? %s' % (
-                    logN, logNlo, logNhi, saturated)
+                    tr['tr']['wa'], tr['tr']['osc'],
+                    colo_nsig=0.05, cohi=0.05,
+                    #colo_nsig=0.5, cohi_nsig=0.5,
+                    #zerolo_nsig=0.5, zerohi_nsig=0.5,
+                    zerolo_nsig=1, zerohi_nsig=1,
+                    )
+                s = '   AOD: logN=%.4f %.3f %.3f' % (logN, logN-logNlo, logNhi-logN)
+                if saturated:
+                    s += ' Saturated'
+                print s
                 self.artists['ew'].remove()
                 self.artists['ew'] = event.inaxes.fill_between(
                     (wa[i0:i1 + 1] / tr['wa'] / (1 + self.z) - 1) * c_kms,
-                    self.nfl[i0:i1 + 1] + off, y2=off + 1,
+                    self.ymult*(self.nfl[i0:i1 + 1]-1) + 1 + off, y2=off + 1,
                     color='r', alpha=0.5)
                 pl.draw()
                 self.indprev = None
+                self.xprev = None
                 return
             else:
                 if self.artists['ew'] is not None:
@@ -622,6 +707,7 @@ class VelplotWrap(object):
                     vpos, [off, off + 1], 'k', alpha=0.3)
                 pl.draw()
                 self.indprev = ind
+                self.xprev = event.xdata
         elif event.key == 'P':
             # save redshift, logN, and plot.
             f = self.filename.rsplit('.', 1)
@@ -656,23 +742,24 @@ class VelplotWrap(object):
 
 
 def main(args):
-    Nargs = len(args)
-    if Nargs == 0:
-        print usage
-        sys.exit(1)
-
-    args, opt_args = process_args(args)
-    options = process_options(opt_args)
+    options = process_options(args)
 
     if options.z is None:
         if options.f26 is not None:
             options.z = np.median(options.f26.lines.z)
         else:
             options.z = 1
-
-    filename = args[0]
-    spec = barak.spec.read(filename)
-    if np.isnan(spec.co).all():
+    try:
+        spec = barak.spec.read(args.filename)
+    except Exception:
+        import linetools.spectra.io as lsio
+        s = lsio.readspec(args.filename)
+        s = barak.spec.Spectrum(wa=s.wavelength.value,
+                                    fl=s.flux.value,
+                                    er=s.sig, co=s.co)
+        spec = s
+        
+    if np.isnan(spec.co).all() or (spec.co == 0).all():
         spec.co[:] = 1.
     if options.fitcontinuum:
         print(stats(spec.fl))
